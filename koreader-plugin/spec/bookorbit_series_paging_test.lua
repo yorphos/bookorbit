@@ -41,4 +41,24 @@ assert(catalog:listFetchCompleteSeries({ page = 1, size = 100, sort = "title" },
     "ordinary book lists keep server pagination")
 assert(#requested == 0, "ordinary book lists do not fetch ahead")
 
+local first_book = { id = 1, title = "First", seriesIndex = 1 }
+local second_book = { id = 2, title = "Second", seriesIndex = 2 }
+package.loaded["bookorbit_list_data"].stateOf = function() return "unread" end
+package.loaded["bookorbit_list_pages"].seriesLayout = function()
+    return { pages = 1, first = 2, rest = 2 }
+end
+function catalog:listScreen() return 600, 800 end
+function catalog:listView() return "grid" end
+function catalog:isBulkSelectionActive() return true end
+function catalog:bulkIsBookSelected(book) return book.id == first_book.id end
+function catalog:listMinutesLeft() return nil end
+local _, model = catalog:listBody("seriespage", {
+    books = { first_book, second_book },
+    params = { seriesId = 42, sort = "title" },
+    series_summary = { total = 2, finished = 0, reading = 0 },
+})
+assert(model.select == true, "a series page exposes active selection mode to its book cards")
+assert(model.selected(first_book) == true, "a series page marks the selected book")
+assert(model.selected(second_book) == false, "a series page leaves unselected books unmarked")
+
 print("bookorbit_series_paging_test.lua: ok")

@@ -1221,6 +1221,8 @@ function CatalogLists:listBody(kind, context)
         local m = {
             entries = books, view = self:listView(kind), screen_w = sw, screen_h = sh, local_page = context.local_page,
             offline = context.list_offline and {} or nil,
+            select = self:isBulkSelectionActive(),
+            selected = function(b) return self.bulk_select_all or self:bulkIsBookSelected(b) end,
             order_label = (context.params or {}).sort == "title" and _("Title A–Z") or _("Reading order"),
             states = states, indexes = indexes, current_index = cur, next_book = next_book,
             range = #books > 0 and T(_("Books %1 – %2"), first, last) or nil,

@@ -255,6 +255,8 @@ function Pages.seriesBody(m, f)
         local short = ListData.distinctTitles(books)
         content = ListView.cellsGrid(list_w, g, books, function(b)
             return ListView.bookCell(g, b, {
+                select = m.select,
+                selected = m.selected and m.selected(b),
                 title = function(x) return x.seriesIndex and (tostring(x.seriesIndex) .. ". " .. (short[x.id] or x.title or "")) or (short[x.id] or x.title or "") end,
                 meta = function(x)
                     local st = ListData.stateOf(x)
@@ -272,7 +274,12 @@ function Pages.seriesBody(m, f)
         content = ListView.indexList(list_w, list_h, {
             entries = books, rows_per_col = rows.n, row_h = rows.rh, cols = 1, gutter = 34, rail = false,
             groupOf = function(b) return "#" .. tostring(b.seriesIndex or "") end, group_rules = false,
-            row = function(w, hh, b) return ListView.bookRow(w, hh, b, { context = "series" }) end, action = m.action,
+            row = function(w, hh, b) return ListView.bookRow(w, hh, b, {
+                select = m.select,
+                selected = m.selected and m.selected(b),
+                context = "series",
+            }) end,
+            action = m.action,
         })
     end
     local list = vstack({ w = list_w }, { head, space(nil, px(8)), content })
