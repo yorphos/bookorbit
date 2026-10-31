@@ -891,6 +891,8 @@ describe('OpdsBookService', () => {
       'title_desc',
       'author_asc',
       'author_desc',
+      'published_asc',
+      'published_desc',
       'series_asc',
       'series_desc',
     ] as const;
@@ -924,6 +926,19 @@ describe('OpdsBookService', () => {
     // Metadata, the reader's status and the aggregate.
     expect(ids.leftJoin).toHaveBeenCalledTimes(3);
     expect(orderText(ids)).toMatch(/DESC NULLS LAST, "user_book_status"."updated_at" DESC NULLS LAST, "books"."id" ASC$/);
+  });
+
+  it.each([
+    ['published_asc', 'ASC'],
+    ['published_desc', 'DESC'],
+  ] as const)('sorts %s by full date, then year fallback, with undated books last and stable ties', async (sortOrder, direction) => {
+    const { service, db } = makeService([[], [{ total: 0 }]]);
+
+    await testable(service).paginatedBookQuery({ kind: 'where' }, sortOrder, 1, 25, 7);
+
+    expect(orderText(selectChains(db)[0]!)).toBe(
+      `coalesce("book_metadata"."published_date", make_date("book_metadata"."published_year", 1, 1)) ${direction} NULLS LAST, "book_metadata"."title" ASC NULLS LAST, "books"."id" ASC`,
+    );
   });
 
   it('maps metadata, authors, and files into ordered OPDS entries', async () => {

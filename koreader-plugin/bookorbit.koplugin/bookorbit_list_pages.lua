@@ -121,8 +121,8 @@ end
 -- with the list alone (landscape keeps the summary column on every page).
 -- A grid shrinks its covers to keep a series on one page only down to three
 -- quarters of the All books size; past that it pages at full size.
-function Pages.seriesLayout(screen_w, screen_h, view, n, offline)
-    local f = ListView.frame(screen_w, screen_h, { toolbar = false, offline = offline })
+function Pages.seriesLayout(screen_w, screen_h, view, n, offline, toolbar)
+    local f = ListView.frame(screen_w, screen_h, { toolbar = toolbar == true, offline = offline })
     local side = BoardMetrics.get().w > BoardMetrics.get().h
     local side_w = side and math.floor(f.w * 0.38 + 0.5) or f.w
     local list_w = side and (f.w - side_w - px(28)) or f.w
@@ -155,7 +155,7 @@ end
 -- puts the summary beside the books.
 function Pages.seriesBody(m, f)
     local all_books = m.entries
-    local layout = Pages.seriesLayout(m.screen_w, m.screen_h, m.view, #all_books, m.offline ~= nil)
+    local layout = Pages.seriesLayout(m.screen_w, m.screen_h, m.view, #all_books, m.offline ~= nil, m.toolbar == true)
     local page = math.max(1, math.min(layout.pages, m.local_page or 1))
     local books = {}
     local start = page == 1 and 1 or (layout.first + (page - 2) * layout.rest + 1)
