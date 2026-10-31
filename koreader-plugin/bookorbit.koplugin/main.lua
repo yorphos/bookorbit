@@ -1486,7 +1486,7 @@ function BookOrbit:registerEvents()
 end
 
 function BookOrbit:onCloseWidget()
-    if self.in_reader and self.settings.catalog_auto_open == "home" then
+    if self.in_reader and self.settings.catalog_auto_open == "home" and not self.skip_return_home_once then
         PluginShare.bookorbit_return_home = os.time()
     end
     if self.periodic_push_task then
