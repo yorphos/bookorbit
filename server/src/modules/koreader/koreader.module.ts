@@ -1,3 +1,4 @@
+import { CatalogModule } from '../catalog/catalog.module';
 import { KoreaderRouletteController } from './koreader-roulette.controller';
 import { KoreaderRouletteService } from './koreader-roulette.service';
 import { KoreaderRouletteRepository } from './koreader-roulette.repository';
@@ -56,6 +57,7 @@ import { KoreaderSyncEstimateCleanupService } from './koreader-sync-estimate-cle
 
 @Module({
   imports: [
+    CatalogModule,
     CollectionModule,
     UserPreferencesModule,
     BookRequestModule,

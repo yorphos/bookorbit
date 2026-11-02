@@ -28,6 +28,7 @@ import {
 
 type Db = NodePgDatabase<typeof schema>;
 type SearchResult = { name: string };
+const GENRE_LIST_LIMIT = 200;
 type SearchResultWithId = { id: number; name: string };
 type NamedTable = typeof authors | typeof narrators | typeof bookSeries;
 type NamedTableWithId = typeof genres | typeof tags;
@@ -98,6 +99,21 @@ export class CatalogRepository {
       .limit(LANGUAGE_LIST_LIMIT);
 
     return rows.filter((row): row is SearchResult => row.name !== null && row.name.trim() !== '');
+  }
+
+  /** Every genre on a visible book with its book count, most common first. */
+  async listGenres(scope: CatalogSearchScope, limit = GENRE_LIST_LIMIT): Promise<Array<SearchResult & { count: number }>> {
+    const rows = await this.db
+      .select({ name: genres.name, count: sql<number>`count(distinct ${books.id})::int` })
+      .from(genres)
+      .innerJoin(bookGenres, eq(bookGenres.genreId, genres.id))
+      .innerJoin(books, eq(books.id, bookGenres.bookId))
+      .where(and(...this.visibilityClauses(scope)))
+      .groupBy(genres.id, genres.name)
+      .orderBy(desc(sql`count(distinct ${books.id})`), genres.name)
+      .limit(limit);
+
+    return rows.filter((row) => row.name.trim() !== '');
   }
 
   searchCollections(userId: number, q: string): Promise<SearchResult[]> {

@@ -3,6 +3,7 @@ import { ForbiddenException, ValidationPipe } from '@nestjs/common';
 import { Permission } from '@bookorbit/types';
 import { PermissionService } from '../../common/services/permission.service';
 import type { RequestUser } from '../../common/types/request-user';
+import { CatalogService } from '../catalog/catalog.service';
 import { CollectionService } from '../collection/collection.service';
 import { UserPreferencesRepository } from '../user-preferences/user-preferences.repository';
 import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
@@ -20,6 +21,7 @@ describe('KOReader home, wishlist and collections', () => {
   const preferences = { findByCategoryPrefix: vi.fn(), upsert: vi.fn(), delete: vi.fn() };
   const external = { search: vi.fn() };
   const core = { checkAvailability: vi.fn() };
+  const catalogGenres = { listGenres: vi.fn() };
   let service: KoreaderHubService;
   beforeEach(async () => {
     vi.resetAllMocks();
@@ -33,6 +35,7 @@ describe('KOReader home, wishlist and collections', () => {
         { provide: UserPreferencesRepository, useValue: preferences },
         { provide: KoreaderExternalCatalogService, useValue: external },
         { provide: BookRequestService, useValue: core },
+        { provide: CatalogService, useValue: catalogGenres },
       ],
     }).compile();
     service = module.get(KoreaderHubService);
@@ -44,6 +47,20 @@ describe('KOReader home, wishlist and collections', () => {
     core.checkAvailability.mockImplementation((items) =>
       Promise.resolve(items.map(() => ({ ownedBookId: null, existingRequestId: null, existingRequestStatus: null, alreadySubscribed: false }))),
     );
+  });
+  it('lists visible library genres first, then catalog subjects not already present', async () => {
+    catalogGenres.listGenres.mockResolvedValue([
+      { name: 'Gothic', count: 3 },
+      { name: 'fantasy', count: 1 },
+    ]);
+    const { items } = await service.genres(user);
+    expect(catalogGenres.listGenres).toHaveBeenCalledWith(user);
+    expect(items.slice(0, 2)).toEqual([
+      { name: 'Gothic', count: 3, inLibrary: true },
+      { name: 'fantasy', count: 1, inLibrary: true },
+    ]);
+    expect(items.filter((g) => g.name.toLowerCase() === 'fantasy')).toHaveLength(1);
+    expect(items).toContainEqual({ name: 'Mystery', count: 0, inLibrary: false });
   });
   it('never falls back to owned books when external discovery fails', async () => {
     external.search.mockRejectedValue(new Error('offline'));

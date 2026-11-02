@@ -12,24 +12,26 @@ local NetworkMgr = require("ui/network/manager")
 local connected, connection_prompts = true, 0
 NetworkMgr.isConnected = function() return connected end
 NetworkMgr.runWhenConnected = function(_, fn) if connected then fn() else connection_prompts = connection_prompts + 1 end end
-local records, status, requests = {}, "approved", {}
+local records, status, requests, request_list = {}, "approved", {}, {}
 for i = 1, 20 do records[i] = {bookId = i + 100, title = "Public-domain title " .. i, authors = {"An author"}, hasCover = false} end
 local client = {}
-function client:runInSubprocess(fn) local body, err = fn(); return true, {body = body, err = err} end
+function client:runInSubprocess(fn) local body, err, errbody = fn(); return true, {body = body, err = err, errbody = errbody} end
 function client:requestBlocking(method, path, payload)
     requests[#requests + 1] = {method = method, path = path, payload = payload}
-    if path:match("roulette/decision$") then return {eventId=payload.eventId}
+    if path:match("/refused$") then return nil, 403, {statusCode = 403, message = "Your account does not have permission to request books"}
+    elseif path:match("roulette/decision$") then return {eventId=payload.eventId}
     elseif path:match("roulette/undo$") then return {undone=true}
     elseif path:match("roulette/acquire$") then return {results={{key=payload.keys[1],request={id=77,status="pending"}}}}
     elseif path:find("roulette/matches",1,true) then return {items={{title="Frankenstein",authors={"Mary Shelley"},matchKey=string.rep("a",32),providerKey="openLibrary",providerId="OL123W",genres={"Gothic","Horror"},description="A public-domain novel."}},hasMore=false}
     elseif path:match("roulette$") then return {items={{title="Frankenstein; or, The Modern Prometheus",authors={"Mary Wollstonecraft Shelley"},genres={"Gothic","Horror","Science fiction"},description=string.rep("A scientist creates life and faces the consequences. ",12),recommendationWhy="Shares Gothic and Horror with a book you liked.",providerKey="openLibrary",providerId="OL123W"}},onboarded=false}
     elseif path:find("hub/home", 1, true) or path:find("hub/discover", 1, true) then return {recommendations = records, continueReading = {}, requests = {}, canRequest = true}
     elseif method == "POST" and (path:match("requests/77/replacement$") or path:match("requests/book/101/replacement$")) then return {request={id=78, title="Frankenstein", canChooseRelease=true, status="approved"}}
+    elseif path:match("requests/91$") then return {id = 91, title = "Walden", authors = {"Henry David Thoreau"}, status = "downloading", progressPercent = 10}
     elseif path:match("requests/77$") then return {id = 77, title = "Frankenstein", authors = {"Mary Shelley"}, status = status, canChooseRelease=true, canRetry=true, canCancel=true, canDiscardHeld=true, canReplace=true, bookId = status == "available" and 101 or nil}
     elseif method == "POST" and path:match("requests$") then return {request = {id = 77, title = "Frankenstein", authors = {"Mary Shelley"}, status = status}}
     elseif path:find("catalog/books/", 1, true) then return {id = 101, bookId = 101, title = "Public-domain title", authors = {"An author"}, hasCover = false}
     elseif path:find("discovery/works", 1, true) then return {title = "Frankenstein", description = "A public-domain novel.", editions = {}}
-    elseif path:find("requests?", 1, true) then return {items = {}, hasMore = false}
+    elseif path:find("requests?", 1, true) then return {items = request_list, hasMore = false}
     else return {items = records, hasMore = false} end
 end
 require("bookorbit_api").new = function() return client end
@@ -136,6 +138,34 @@ assert(hub.route.kind == "request_detail" and hub.state.body.status == "approved
 for _, call in ipairs(requests) do if call.method == "POST" then assert(not call.payload.downloadUrl, "Acquisition must remain server-side") end end
 status = "available"; hub:load(); hub:load()
 assert(completions == 1, "Ready transition should trigger one resync, not polling/repeated resyncs")
+-- A request that finishes while another screen is open is still noticed and synced once.
+hub:observe({{id = 90, title = "The Time Machine", status = "downloading"}})
+assert(hub.watchTimer and plugin.settings.hub_watched_requests.items["90"], "Active requests must be followed and saved")
+hub:navigate({kind = "home"})
+request_list = {{id = 90, title = "The Time Machine", status = "available", bookId = 102}}
+hub:checkWatched()
+assert(completions == 2, "A watched request becoming ready must trigger one sync from any screen")
+assert(next(plugin.settings.hub_watched_requests.items) == nil and hub.watchTimer == nil, "Finished requests stop being watched")
+hub:checkWatched(); assert(completions == 2, "No repeated sync once a request is settled")
+-- The open request page shows new progress without a manual refresh.
+hub:navigate({kind = "request_detail", id = 91, request = {id = 91, title = "Walden", status = "downloading", progressPercent = 10}})
+assert(plugin.settings.hub_watched_requests.items["91"], "Opening an active request follows it")
+request_list = {{id = 91, title = "Walden", status = "downloading", progressPercent = 40}}
+hub:checkWatched()
+assert(hub.state.body.progressPercent == 40, "Background checks must update the visible request")
+-- Background checks never queue behind or block the reader's actions.
+local before_busy = #requests
+hub.busy = true; hub:checkWatched(); hub.busy = false
+assert(#requests == before_busy and hub.watchTimer, "A check while busy waits for the next turn")
+hub.busy, hub.activeFetch = true, {method = "GET", path = "x", route = hub.route, quiet = true}
+hub:fetch("POST", "/koreader/plugin/requests/91/cancel", {}, function() end)
+assert(hub.pendingFetch and hub.pendingFetch[1] == "POST", "Actions wait for a background check instead of being refused")
+hub.busy, hub.activeFetch, hub.pendingFetch = false, nil, nil
+request_list = {}
+-- Refused actions show the server's reason, not a generic network error.
+hub:fetch("POST", "/koreader/plugin/requests/refused", {}, function() error("refused action ran") end)
+assert(hub.state.error:find("Not allowed", 1, true) and hub.state.error:find("permission to request books", 1, true), "Show why an action was refused")
+hub:navigate({kind = "request_detail", id = 77, request = {id = 77, title = "Frankenstein", status = status}})
 local delivery_calls, opened = 0
 hub.catalog.fetchDeliveryBook = function(_, id) delivery_calls = delivery_calls + 1; return {id = id, title = "Public-domain title", authors = {}, files = {}} end
 require("bookorbit_download_sheet").open = function(_, detail, opts) opened = {detail = detail, opts = opts} end
@@ -176,6 +206,21 @@ assert(hub.state.book.matchKey,"Loading external detail must retain match member
 local acquisition_start=#requests
 tap("primary")
 assert(requests[acquisition_start+1].path:match("roulette/acquire$"),"Add to Library must use the explicit acquisition endpoint")
+assert(plugin.settings.hub_watched_requests.items["77"], "Requests created from Matches must be followed")
+-- A decision whose reply never arrived can be discarded instead of blocking Roulette.
+local Roulette = require("bookorbit_roulette")
+plugin.settings.roulette_pending = {account = hub.account, payload = {eventId = "11111111-1111-4111-8111-111111111111", decision = "match", book = {title = "Lost reply"}}}
+local stuck_rows
+local menu_before = hub.menu
+hub.menu = function(_, _, rows) stuck_rows = rows end
+Roulette.decide(hub, "pass", {title = "Next book", authors = {}})
+assert(stuck_rows and #stuck_rows == 2, "An unconfirmed decision must offer Retry and Discard")
+hub.menu = menu_before
+local discard_start = #requests
+stuck_rows[2].callback()
+local sent = requests[discard_start + 1]
+assert(sent.path:match("roulette/decision$") and sent.payload.book.title == "Next book" and sent.payload.decision == "pass", "Discarding must continue with the new decision")
+assert(plugin.settings.roulette_pending == nil, "The new decision is confirmed and cleared")
 hub:close()
 local original_document={position=42,annotations={"preserved"}}
 plugin.ui={document=original_document}

@@ -10,7 +10,7 @@ async function readPluginFile(name: string): Promise<string> {
 }
 
 describe('KOReader plugin update source wiring', () => {
-  it("opens BookOrbit from KOReader's menu bar and keeps Tools to two rows", async () => {
+  it("opens BookOrbit from KOReader's menu bar and offers Return to BookOrbit in a book", async () => {
     const menu = await readPluginFile('bookorbit_main_menu.lua');
     const pin = await readPluginFile('bookorbit_menu_pin.lua');
     const updater = await readPluginFile('bookorbit_updater.lua');
@@ -20,7 +20,8 @@ describe('KOReader plugin update source wiring', () => {
     );
 
     expect(toolsBlock).toContain('id = "open_dashboard"');
-    expect(toolsBlock).toContain('text = _("Open BookOrbit")');
+    expect(toolsBlock).toContain('_("Return to BookOrbit") or _("Open BookOrbit")');
+    expect(toolsBlock).toContain('id = "book_requests"');
     expect(toolsBlock).toContain('id = "this_book"');
     expect(toolsBlock).toContain('id = "settings"');
     expect(toolsBlock).toContain('sorting_hint = "tools"');

@@ -45,6 +45,11 @@ export class CatalogService {
     return this.searchVisible(user, q, (scope) => this.catalogRepository.searchLanguages(q, scope));
   }
 
+  /** Genres on books the user can see, with counts, for browse menus that need no search term. */
+  listGenres(user: RequestUser) {
+    return this.inVisibleScope(user, (scope) => this.catalogRepository.listGenres(scope));
+  }
+
   searchCollections(userId: number, q: string) {
     return this.catalogRepository.searchCollections(userId, q);
   }

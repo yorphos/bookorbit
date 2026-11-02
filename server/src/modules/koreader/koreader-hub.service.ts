@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { bookRequestWorkKey, Permission } from '@bookorbit/types';
 import type { RequestUser } from '../../common/types/request-user';
 import { PermissionService } from '../../common/services/permission.service';
+import { CatalogService } from '../catalog/catalog.service';
 import { CollectionService } from '../collection/collection.service';
 import { UserPreferencesRepository } from '../user-preferences/user-preferences.repository';
 import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
@@ -15,6 +16,21 @@ import { KoreaderWishlistBookDto } from './dto/koreader-hub.dto';
 
 const WISHLIST_PREFIX = 'koreader-wishlist:';
 const PAGE_SIZE = 20;
+// Broad catalog subjects offered after the library's own genres, so browsing works on an empty library.
+const CATALOG_GENRES = [
+  'Fiction',
+  'Science fiction',
+  'Fantasy',
+  'Mystery',
+  'Thriller',
+  'Romance',
+  'History',
+  'Biography',
+  'Horror',
+  'Adventure',
+  'Classics',
+  'Nonfiction',
+];
 
 @Injectable()
 export class KoreaderHubService {
@@ -26,6 +42,7 @@ export class KoreaderHubService {
     private readonly preferences: UserPreferencesRepository,
     private readonly external: KoreaderExternalCatalogService,
     private readonly bookRequests: BookRequestService,
+    private readonly catalogGenres: CatalogService,
   ) {}
 
   async home(user: RequestUser) {
@@ -157,6 +174,17 @@ export class KoreaderHubService {
             : 'Popular books outside your library',
       canRequest,
     };
+  }
+
+  /** Genres in books this user can see, most common first, then catalog subjects not already listed. */
+  async genres(user: RequestUser) {
+    const library = await this.catalogGenres.listGenres(user);
+    const seen = new Set(library.map((g) => g.name.trim().toLowerCase()));
+    const items = library.map((g) => ({ name: g.name, count: g.count, inLibrary: true }));
+    for (const name of CATALOG_GENRES) {
+      if (!seen.has(name.toLowerCase())) items.push({ name, count: 0, inLibrary: false });
+    }
+    return { items };
   }
 
   async collectionList(user: RequestUser, page: number, bookId?: number) {

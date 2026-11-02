@@ -1,0 +1,9 @@
+# Formatting for the hub/roulette modules added in this fork. Upstream plugin
+# files are left as they are so merges from upstream stay small:
+#   stylua bookorbit.koplugin/bookorbit_hub*.lua bookorbit.koplugin/bookorbit_roulette.lua
+column_width = 120
+indent_type = "Spaces"
+indent_width = 4
+quote_style = "AutoPreferDouble"
+call_parentheses = "Input"
+collapse_simple_statement = "Never"

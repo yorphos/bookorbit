@@ -28,6 +28,11 @@ export class KoreaderHubController {
     return this.hub.discovery(user);
   }
 
+  @Get('genres')
+  genres(@CurrentUser() user: RequestUser) {
+    return this.hub.genres(user);
+  }
+
   @Get('collections')
   collections(@CurrentUser() user: RequestUser, @Query() query: KoreaderCollectionQueryDto) {
     return this.hub.collectionList(user, query.page, query.bookId);
