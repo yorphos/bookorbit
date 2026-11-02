@@ -5654,7 +5654,7 @@
       "around": "Intorno a questo evento",
       "aroundHint": "{name}, 40 minuti su entrambi i lati",
       "aroundEmpty": "Niente altro da {name} entro 40 minuti.",
-      "history": "Storico",
+      "history": "Cronologia",
       "historyCount": "{count, plural, one {# evento} other {# eventi}}",
       "historyMeta": "{name} · {date}, {time}",
       "thisEvent": "Questo evento",
@@ -6573,7 +6573,7 @@
         "title": "Aggiungi sessione di lettura",
         "startedAt": "Iniziato alle",
         "duration": "Durata (minuti)",
-        "endProgress": "Fine avanzamento %",
+        "endProgress": "% completamento",
         "optional": "Facoltativo",
         "format": "Formato",
         "noFormat": "Nessun formato specifico",
@@ -6792,7 +6792,7 @@
         "formatNotSupported": "Questo formato di file non supporta il writeback",
         "formatDisabled": "Il writeback è disabilitato per questo formato",
         "fileExceedsSizeLimit": "Questo file supera il limite di dimensione del writeback",
-        "writing": "Scrivere...",
+        "writing": "Scrittura in corso...",
         "saveInProgress": "Salvataggio in corso",
         "writeManualLibraryDisabled": "Scrivi i metadati su file e rinominali su disco; il writeback automatico è disabilitato per questa biblioteca",
         "writeManualTooltip": "Scrivi {fields} in {target} e rinomina su disco",
@@ -6828,7 +6828,7 @@
         "lockAllTooltip": "Blocca tutti i campi",
         "unlockAll": "Sblocca tutto",
         "unlockAllTooltip": "Sblocca tutti i campi",
-        "saving": "Salvataggio...",
+        "saving": "Salvataggio in corso...",
         "fileWriteBackDetails": "Dettagli della riscrittura del file",
         "fileWriteBack": "Riscrittura del file",
         "enabled": "Abilitato",
@@ -6851,7 +6851,7 @@
         "publisherLabel": "Editore",
         "languageLabel": "Lingua",
         "yearLabel": "Anno",
-        "pageCountLabel": "Conteggio pagine",
+        "pageCountLabel": "Numero Pagine",
         "isbn13Label": "ISBN-13",
         "isbn10Label": "ISBN-10",
         "durationLabel": "Durata (s)",
@@ -6859,7 +6859,7 @@
         "providerIds": "ID fornitore",
         "externalProviderUnavailable": "{provider} non è più registrato, quindi questo id è mantenuto ma non utilizzato",
         "clearExternalProviderId": "Cancella l'Id di {provider}",
-        "comicDetails": "Dettagli comici",
+        "comicDetails": "Dettagli del fumetto",
         "comicIssueNumberLabel": "Numero di emissione",
         "comicVolumeLabel": "Volume",
         "comicStoryArcsLabel": "Archi narrativi",
@@ -6950,7 +6950,7 @@
             "narrators": "Narratori",
             "durationSeconds": "Durata (secondi)",
             "abridged": "Ridotto",
-            "hardcoverEditionId": "Hardcover",
+            "hardcoverEditionId": "Hardcover ID",
             "comicIssueNumber": "Numero del problema",
             "comicVolumeName": "Volume",
             "comicPencillers": "Disegnatori",
@@ -7098,7 +7098,7 @@
             "stagedInSection": "{count} messo in scena"
           },
           "sections": {
-            "identity": "Identità",
+            "identity": "Dati identificativi",
             "description": "Descrizione",
             "publication": "Pubblicazione",
             "series": "Serie",
@@ -7198,8 +7198,8 @@
         },
         "writeAndRename": "Scrivi su file e rinomina",
         "writeAndRenameShort": "Scrivi e rinomina",
-        "identityCard": "Identità",
-        "catalogCard": "Catalogo",
+        "identityCard": "Dati identificativi",
+        "catalogCard": "Dati di catalogo",
         "sourceCard": "Fonte",
         "score": "Punteggio",
         "scoreTooltip": "Punteggio metadati {score} su 100",
@@ -7449,7 +7449,57 @@
               "replace_target_missing": "La lettura vocale da sostituire non era più presente, quindi è stato aggiunto un nuovo file",
               "replace_not_permitted": "La sostituzione della lettura vocale non è più consentita, quindi è stato aggiunto un nuovo file",
               "job_completed": "Il worker ha finito",
-              "cancel_requested": "Annullamento richiesto"
+              "cancel_requested": "Annullamento richiesto",
+              "runner_killed": "Fermato il processo worker",
+              "job_cancelled": "I servizio worker si è arrestato",
+              "cancelled": "Annullato",
+              "discarded": "Scartato in fase di revisione",
+              "job_failed": "Il worker ha segnalato un errore",
+              "retry_requested": "Nuovo tentativo richiesto",
+              "resync_requested": "Risincronizzazione richiesta",
+              "review_reminder_sent": "Promemoria inviato: la revisione scade a breve",
+              "review_expired": "Scartato dopo 14 giorni senza revisione"
+            }
+          },
+          "warnings": {
+            "unaligned_tracks": "Una o più tracce audio non possono essere allineate.",
+            "unmatched_text": "Una grande quantità di testo dell'ebook non è stata abbinata alla narrazione.",
+            "interpolated_text": "Sincronizzazione testo parzialmente stimata tra punti certi.",
+            "dropped_text": "\"Alcune parti del testo dell'ebook sono state omesse dalla sequenza sincronizzata."
+          },
+          "errors": {
+            "create": "Impossibile avviare la lettura vocale. Riprova.",
+            "createInvalid": "Alcuni file selezionati non sono più disponibili per questo libro. Controlla e riprova.",
+            "createConflict": "Per questo libro è già in fase di creazione un'altra lettura vocale.",
+            "createUnavailable": "Il servizio di lettura vocale è offiline. Riprova più tardi.",
+            "forbidden": "Non disponi dei permessi necessari.",
+            "gone": "Questo processo non esiste più.",
+            "conflict": "Questo job è già andato avanti. Ora mostra a che punto si trova.",
+            "cancel": "Impossibile annullare il job. Riprova.",
+            "publish": "Impossibile aggiungere la lettura vocale a questo libro. Riprova.",
+            "retry": "Impossibile riavviare il job. Riprova.",
+            "resync": "Impossibile avviare la risincronizzazione. Riprova.",
+            "job": {
+              "worker_unavailable": "Impossibile raggiungere il worker di lettura vocale.",
+              "worker_incompatible": "Il worker di lettura vocale richiede un aggiornamento per funzionare con questo server.",
+              "worker_crashed": "Il worker per la lettura vocale si è interrotto in modo imprevisto.",
+              "library_not_mounted": "Il worker di lettura vocale non riesce ad accedere alla cartella di questa biblioteca.",
+              "source_missing": "Un file selezionato non è più disponibile.",
+              "source_changed": "Un file selezionato è cambiato dopo l'avvio del job.",
+              "invalid_source": "Impossibile leggere il file EPUB o l'audiolibro selezionato.",
+              "unsupported_language": "Il modello vocale non supporta la lingua selezionata.",
+              "insufficient_storage": "Non c'è abbastanza spazio libero su disco per terminare il job.",
+              "audio_processing_failed": "Impossibile preparare l'audiolibro.",
+              "model_download_failed": "Impossibile scaricare il modello vocale.",
+              "inference_failed": "Riconoscimento vocale non riuscito durante l'ascolto della narrazione.",
+              "markup_failed": "Impossibile preparare il testo per la sincronizzazione.",
+              "alignment_failed": "Impossibile sincronizzare il testo con la narrazione.",
+              "invalid_output": "L'EPUB generato non ha superato i controlli.",
+              "publication_failed": "L'EPUB generato non può essere aggiunto a questo libro.",
+              "review_expired": "Non è stato revisionato entro 14 giorni.",
+              "discarded": "La lettura vocale è stata scartata in sede di revisione.",
+              "cancelled": "Il job è stato annullato.",
+              "unknown": "Qualcosa è andato storto durante la creazione della lettura vocale."
             }
           }
         },
@@ -7460,12 +7510,12 @@
           "formats": "Formati"
         },
         "filesHeading": "File",
-        "allPresent": "Titti presenti",
+        "allPresent": "Tutti presenti",
         "groupedByReader": "raggruppati per lettore",
         "thisFile": "Questo file",
         "writeBackShort": "Scrittura su file",
         "fieldsSet": "{filled} / {total} impostato",
-        "writtenSummary": "{fields} e {count, plural, one {# altro campo} many {# altri campi} other {# altri campi}} sono scritti nel {format}.",
+        "writtenSummary": "{fields} e {count, plural, one {# altro campo} many {altri # campi} other {altri # campi}} sono scritti nel file {format}.",
         "writtenSummaryAll": "{fields} vengono scritti nel {format}.",
         "writtenNothing": "Nessuno degli {total} campi scrivibili ha ancora un valore.",
         "writeBackOff": "La scrittura su file è disabilitata per questo libro.",
@@ -7514,7 +7564,7 @@
         "peek": "Sbircia",
         "download": "Scarica",
         "moreActions": "Più azioni",
-        "rename": "Rinominare",
+        "rename": "Rinomina",
         "empty": {
           "title": "Nessun file allegato",
           "description": "Questo libro non ha file associati."
@@ -7624,6 +7674,11 @@
         }
       },
       "chapters": {
+        "heading": "Capitoli",
+        "untitled": "Libro senza titolo",
+        "untitledChapter": "Capitolo senza titolo",
+        "edit": "Modifica capitoli",
+        "done": "Completato",
         "protected": "Protetto",
         "unprotected": "Non protetto",
         "protectedHint": "Scansioni e aggiornamenti metadati ignorano questi capitoli.",
@@ -7640,10 +7695,12 @@
           "migration": "Importato da Audiobookshelf",
           "manual": "Modificato in BookOrbit",
           "manualBy": "Modificato da {name} {when}",
+          "readAlong": "Da narrazione a EPUB, solo visualizzazione",
           "none": "Non è stato ancora aggiunto alcun capitolo"
         },
         "youAreHere": "Ti trovi qui",
         "playFrom": "Ascolta {title}",
+        "openInReader": "Apri {title} nel lettore",
         "selectRow": "Seleziona il capitolo {index}",
         "selectedCount": "{count, plural, one {# selezionato} many {# selezionati} other {# selezionati}}",
         "selectAll": "Seleziona tutto",
@@ -7683,6 +7740,39 @@
           "pause": "Pausa anteprima",
           "back": "Indietro di 15 secondi",
           "forward": "Avanti di 15 secondi"
+        },
+        "history": {
+          "heading": "Cronologia",
+          "empty": "Le versioni salvate appaiono qui.",
+          "by": "{source} da {name}",
+          "facts": "{when}: {count, plural, one {# capitolo} other {# capitoli}}",
+          "source": {
+            "embedded": "Dai file audio",
+            "tracks": "Uno per ogni file audio",
+            "provider": "Dai metadati recuperati",
+            "migration": "Da Audiobookshelf",
+            "manual": "Modificato"
+          }
+        },
+        "revert": {
+          "action": "Ripristina i capitoli dei file",
+          "title": "Ripristinare i capitoli del file?",
+          "description": "BookOrbit eseguirà una nuova lettura dei capitoli inclusi nei file audio rimuovendo la protezione dalle nuove scansioni. Eventuali modifiche non salvate verranno perse. La lista corrente verrà conservata nella cronologia.",
+          "confirm": "Ripristina",
+          "done": "Capitoli ripristinati dai file audio"
+        },
+        "discardDialog": {
+          "title": "Scartare le modifiche del capitolo?",
+          "description": "Le modifiche ai capitoli non sono state salvate.",
+          "confirm": "Scarta"
+        },
+        "save": {
+          "action": "Salva capitoli",
+          "discard": "Scarta",
+          "lock": "Proteggi da nuove scansioni",
+          "lockHint": "Mantiene questi capitoli quando i file sono riscansionati o i metadati vengono aggiornati.",
+          "unsaved": "Modifiche non salvate",
+          "unsavedWithWarnings": "{count, plural, one {Modifiche non salvate, # avviso} other {Modifiche non salvate, # avvisi}}"
         },
         "apply": {
           "titles": "Solo titoli",
@@ -7754,7 +7844,46 @@
           "fitPausesResult": "Adatta alla pausa ({seconds} s, {hits} di {total})",
           "fitPausesNone": "Nessun singolo scostamento riesce ad allineare questi capitoli con le pause nel tuo audio."
         },
+        "tools": {
+          "shift": {
+            "description": "Sposta l'inizio dei capitoli in avanti o indietro della stessa quantità. Un capitolo a 0:00 rimane invariato.",
+            "amount": "Secondi",
+            "hint": "I valori negativi anticipano l'inizio dei capitoli. Usa questa opzione quando un'edizione ha un'introduzione più lunga o più corta.",
+            "invalid": "Inserisci un numero di secondi, come 4.04 o -2."
+          },
+          "renumber": {
+            "title": "Rinumera i titoli",
+            "description": "Attribuisce ai capitoli dei titoli numerati in ordine progressivo.",
+            "pattern": "Modello per i titoli",
+            "hint": "{'{n}'} è sostituito dal numero.",
+            "start": "Numero iniziale",
+            "invalid": "Inserisci un numero iniziale intero non negativo e formatta con zeri iniziali da 0 a 4.",
+            "padding": "Cifre"
+          },
+          "replace": {
+            "title": "Trova e sostituisci",
+            "description": "Modifica testo nei titoli del capitolo.",
+            "find": "Cerca",
+            "with": "Sostituisci con",
+            "regex": "Espressione regolare",
+            "caseSensitive": "Rispetta maiuscole/minuscole",
+            "invalidPattern": "Questa espressione regolare non è valida."
+          },
+          "mergeShort": {
+            "title": "Unisci capitoli brevi",
+            "description": "Accorpa i capitoli più brevi di una determinata durata a quello precedente.",
+            "threshold": "Più breve di (secondi)",
+            "invalid": "Inserisci un numero di secondi maggiore di 0."
+          },
+          "clean": {
+            "title": "Pulisci i titoli",
+            "nothing": "I titoli sono già puliti.",
+            "done": "{count, plural, one {Pulito # titolo} other {Puliti # titoli}}"
+          }
+        },
         "snap": {
+          "menu": "Allinea alle pause...",
+          "title": "Allinea alle pause",
           "description": "Sposta l'inizio dei capitoli sulla pausa più vicina nell'audio, dove il narratore si ferma tra un capitolo e l'altro.",
           "radius": "Cerca una pausa",
           "radiusOption": "Entro {seconds} s da ciascun lato",
@@ -7814,7 +7943,37 @@
           "left": "{time} al termine"
         },
         "timeline": {
-          "label": "Capitoli in tutto il libro"
+          "label": "Capitoli in tutto il libro",
+          "listened": "{percent} del libro ascoltato"
+        },
+        "cut": {
+          "heading": "Taglia",
+          "label": "Taglia tra {previous} e {next}",
+          "firstHeading": "Inizia il libro",
+          "count": "{index} di {total}",
+          "previous": "Taglio precedente",
+          "next": "Taglio successivo",
+          "ends": "Fine",
+          "starts": "Inizio",
+          "saved": "salvato",
+          "backToCut": "Torna al taglio",
+          "move": "Sposta il taglio",
+          "playCut": "Riproduci il taglio",
+          "playCutHint": "Riproduci per alcuni secondi entrambi i lati del taglio (P)",
+          "stop": "Arresta",
+          "stopHint": "Interrompi la riproduzione (P)",
+          "snap": "Allinea alla pausa",
+          "onPause": "Su una pausa",
+          "noPause": "{seconds, plural, one {Nessuna pausa entro # secondo} other {Nessuna pausa entro # secondi}}",
+          "remove": "Rimuovi taglio",
+          "removeHint": "{title} viene unito a {previous}",
+          "first": "Il primo capitolo inizia sempre alle 0:00, quindi non ha alcun punto di taglio da spostare. Seleziona un altro capitolo per regolarne l'inizio.",
+          "announce": "Taglia a {time}",
+          "moveHere": "Sposta il taglio qui",
+          "moveHereHint": "Sposta questo taglio a {time} (M)",
+          "moveHereOutside": "Sposta il cursore di riproduzione dentro {previous} o {title} per posizionare lì il taglio.",
+          "newChapterHere": "Nuovo capitolo qui",
+          "newChapterHereHint": "Inizia un nuovo capitolo a {time}"
         }
       },
       "highlights": {
@@ -8762,6 +8921,10 @@
       "noResultsHint": "Prova un titolo o un autore diverso.",
       "noResultsIndexerHint": "Prova un titolo o un autore diverso oppure cerca \"{title}\" negli indicizzatori e scegli tu stesso una pubblicazione.",
       "freeTextAction": "Cerca indicizzatori",
+      "noResultsRequestHint": "Prova un titolo o un autore diverso, oppure richiedi \"{title}\" così come l'hai digitato. Una nota per chi approva nella sezione \"Altre opzioni\" lo aiuterà a trovare il libro giusto.",
+      "noResultsRequestAutoHint": "Prova un titolo o un autore diverso, oppure richiedi \"{title}\" così come l'hai digitato.",
+      "requestAnywayAction": "Richiedi comunque",
+      "searchAuthor": "Mostra libri di {author}",
       "manualSearchAction": "Cerca manualmente gli indicizzatori",
       "yearUnknown": "Anno sconosciuto",
       "sourceCount": "{count, plural, one {# fonte} many {# fonti} other {# fonti}}",
@@ -9142,7 +9305,18 @@
         "clientRefused": "Il tuo client di download ha rifiutato una versione precedente",
         "clientUnavailable": "Il tuo client di download non ha risposto a una versione precedente"
       },
+      "clientProblem": {
+        "unavailable": "{client} non risponde",
+        "unavailableUnnamed": "Il tuo client di download non risponde",
+        "unavailableHint": "Impossibile inviare i rilasci che lo usano finché non risponde. Controlla che sia attivo e riprova.",
+        "refused": "{client} ha rifiutato il rilascio",
+        "refusedUnnamed": "Il tuo client di download ha rifiutato il rilascio",
+        "refusedHint": "I rilasci che lo usano non possono essere inviati fino a quando questo non è corretto.",
+        "retry": "Riprova"
+      },
       "singleFileNote": "Una pubblicazione può essere un libro in diversi formati, un audiolibro in parti o un archivio: tutti questi vengono importati come un singolo libro. Una release che contiene diversi libri separati ti chiede quale conservare.",
+      "holdForReview": "Controlla il download prima che venga archiviato",
+      "releasePageLabel": "{title}, pagina del rilascio su {indexer}",
       "searching": "Ricerca negli indicizzatori...",
       "refresh": "Cerca di nuovo",
       "cached": "Mostra l'ultima ricerca. Cerca di nuovo per nuovi risultati.",
@@ -9460,6 +9634,7 @@
       "scoreShort": "Il file importato ha ottenuto un punteggio di {score} rispetto a questa richiesta, inferiore al {threshold} necessario per archiviarlo automaticamente.",
       "scoreClears": "Il file importato ha ottenuto il punteggio {score}, che cancella i {threshold} necessari per archiviarlo automaticamente.",
       "verificationOff": "Il controllo dell'importazione è disattivato, quindi questo file non è mai stato valutato rispetto alla richiesta.",
+      "heldOnRequest": "Questo rilascio è stato inviato per essere controllato prima dell'archiviazione, quindi ti aspetta.",
       "reason": {
         "isbn_match": "Il suo ISBN è quello richiesto.",
         "above_threshold": "Sembra il libro richiesto.",
@@ -9479,9 +9654,17 @@
       },
       "requested": "Richiesto",
       "imported": "Importato",
+      "releasePage": "Apri la pagina del rilascio",
       "absent": "Né la richiesta né il file ne hanno uno.",
       "notSet": "Non impostato",
+      "editionTitle": "Ciò che il file dichiara di essere",
       "edition": {
+        "publisher": "Editore",
+        "published": "Pubblicato",
+        "language": "Lingua",
+        "pages": "Pagine",
+        "isbn10": "ISBN-10",
+        "narrators": "Narrato da",
         "length": "Lunghezza",
         "version": "Versione",
         "chapters": "Capitoli"
@@ -9647,7 +9830,7 @@
       "scanProgress": "{processed} / {total} libri",
       "smartScopes": "Filtri intelligenti",
       "newSmartScope": "Nuovo ambito intelligente",
-      "noSmartScopes": "Ancora nessuno Smart Scope",
+      "noSmartScopes": "Nessun Filtro Intelligente",
       "collections": "Collezioni",
       "newCollection": "Nuova collezione",
       "noCollections": "Nessuna raccolta ancora",
@@ -10085,7 +10268,7 @@
       "reorderHintWidget": "Trascina per riordinare. Seleziona per mostrare o nascondere un widget.",
       "reorderHintShelf": "Trascina per riordinare. Attiva/disattiva per mostrare o nascondere uno scaffale.",
       "smartScope": "Ambito intelligente",
-      "noSmartScopes": "Ancora nessuno Smart Scope. Creane uno dalla barra laterale.",
+      "noSmartScopes": "Nessun Filtro Intelligente. Creane uno dalla barra laterale.",
       "addShelf": "Aggiungi scaffale",
       "resetToDefaults": "Ripristina le impostazioni predefinite"
     },
@@ -10220,7 +10403,7 @@
       "groups": "Gruppi",
       "templates": "Modelli",
       "preferences": "Preferenze",
-      "history": "Storia"
+      "history": "Cronologia"
     },
     "providers": {
       "heading": "Provider SMTP",
@@ -11250,7 +11433,30 @@
           },
           "reapply": {
             "action": "Applica regole ai libri esistenti",
-            "applying": "Applicazione delle regole in corso..."
+            "applying": "Applicazione delle regole in corso...",
+            "hint": "Aggiorna libri già presenti in questa biblioteca con i campi stabiliti da queste regole. Non cambia nient'altro, e i campi bloccati sono mantenuti.",
+            "saveFirst": "Salva prima le modifiche, quindi applica le regole ai libri esistenti.",
+            "confirm": "Vuoi applicare le regole salvate a tutti i libri in questa biblioteca? L'operazione verrà eseguita in background e puoi chiudere questo editor. Verranno scritti solo i campi stabiliti dalle regole; i campi bloccati e i metadati forniti direttamente dai file verranno mantenuti.",
+            "progressSummary": "Elaborati {processed} di {total}: {updated} aggiornati, {unchanged} invariati, {skipped} saltati, {failed} non riusciti.",
+            "jobStatus": {
+              "running": "Applicazione delle regole in background.",
+              "completed": "Regole applicate ai libri esistenti.",
+              "failed": "L'applicazione si è interrotta prima del completamento. Le modifiche già apportate sono state conservate; puoi rieseguire l'operazione in tutta sicurezza."
+            },
+            "errors": {
+              "notConfigured": "Salva le regole dei percorsi per questa libreria prima di applicarle.",
+              "alreadyRunning": "Le regole sono già applicate a questa biblioteca.",
+              "busy": "Sono in corso applicazioni di regole su altre biblioteche. Riprova a breve.",
+              "requestFailed": "Impossibile raggiungere il server. Chiudere e riaprire questo editor per controllare lo stato.",
+              "interrupted": "Lo stato del job non è più disponibile. Potrebbe essere stato interrotto da un riavvio del server. Puoi eseguirlo nuovamente in sicurezza."
+            },
+            "failureSample": "Libro {bookId}: {reason}",
+            "failureReasons": {
+              "rules_unavailable": "Tempo scaduto durante la valutazione delle regole.",
+              "rules_invalid": "Le regole salvate non possono essere applicate. Apri Configura, controlla e salva di nuovo.",
+              "file_unavailable": "Non è stato possibile leggere il file del libro, quindi non è stato modificato nulla. Verifica che la cartella della libreria sia raggiungibile.",
+              "metadata_failed": "Impossibile salvare i metadati del libro."
+            }
           }
         }
       },
@@ -11520,7 +11726,41 @@
       }
     },
     "folderBrowser": {
+      "title": "Scegli le cartelle",
+      "subtitle": "Per {name} · {mode}",
+      "unnamedLibrary": "nuova biblioteca",
+      "close": "Chiudi",
+      "mode": {
+        "folder": "Cartella come libro",
+        "file": "File come libro"
+      },
+      "field": {
+        "placeholder": "Cera una cartella o incolla un percorso",
+        "label": "Cerca una cartella o digita un percorso",
+        "clear": "Pulisci",
+        "mounted": "Montato",
+        "libraries": "Biblioteche",
+        "recent": "Recente",
+        "thisLibrary": "{name} (questa libreria)",
+        "jumpHint": "Digita per trovare una cartella per nome, o inizia con {key} per digitare un percorso",
+        "inFolder": "In {path}",
+        "completeHint": "{tab} completa {enter} mostra nell'alberatura",
+        "noCompletion": "Nessuna cartella in {path} inizia così. {key} prova il percorso esattamente come scritto.",
+        "pathMissing": "{path} non esiste sul server.",
+        "pathMissingSuggest": "{path} non esiste sul server. Forse intendevi {suggestion}?",
+        "pathBlocked": "BookOrbit non può aprire {path}: si tratta di una cartella di sistema.",
+        "findSummary": "{count, plural, one {# cartella corrisponde a} other {# cartelle corrispondono a}} \"{query}\", {count, plural, one {visualizzata} other {visualizzate}} insieme alle cartelle circostanti.",
+        "findEnter": "{key} va alla prima.",
+        "findTruncated": "Visualizzazione delle prime {count} corrispondenze.",
+        "findNone": "Nessuna cartella sul server corrisponde. Prova con meno lettere."
+      },
       "view": {
+        "button": "Vista",
+        "label": "Visualizza opzioni",
+        "sort": "Ordinamento",
+        "sortName": "Nome",
+        "sortBooks": "Dal maggior numero di libri",
+        "show": "Mostra",
         "showEmpty": "Cartelle senza libri",
         "showSystem": "Cartelle di sistema"
       },
@@ -11575,8 +11815,81 @@
         "remove": "Rimuovi {name}",
         "fit": {
           "folder": "Ciascuna cartella contiene un libro.",
-          "file": "Ciascun file è un libro."
+          "file": "Ciascun file è un libro.",
+          "empty": "Vuoto al momento."
+        },
+        "attention": {
+          "containsOne": "Contiene {folder}, utilizzata da {library}. Quei libri verrebbero inclusi in due biblioteche.",
+          "containsMany": "Contiene cartelle utilizzate da {libraries}. I libri sarebbero in due biblioteche.",
+          "overlapExact": "{library} gestisce già questa cartella. Entrambe le biblioteche importerebbero {count, plural, one {lo stesso # libro} other {gli stessi # libri}}.",
+          "overlapInside": "Questa cartella è all'interno della cartella di {library}, quindi i suoi libri sarebbero in entrambe le biblioteche.",
+          "merge": "{count, plural, one {# cartella qui contiene} other {# cartelle qui contengono}} diversi libri: attivando \"Cartella come libro\" ognuna viene considerata come 1 singolo libro.",
+          "split": "{count, plural, one {# audiolibro qui è} other {# audiolibri qui sono}} suddiviso in parti: utilizzando File come libro ogni parte diventa un libro a sé stante.",
+          "locked": "L'organizzazione non può essere modificata dopo la creazione della libreria.",
+          "leaveOutOne": "Escludi {folder}",
+          "leaveOutMany": "Escludili",
+          "remove": "Rimuovi",
+          "useFile": "Utilizza File come libro",
+          "useFolder": "Utilizza Cartella come libro"
+        },
+        "suggestions": "In nessuna biblioteca",
+        "suggestionsMeta": "libri non gestiti in nessuna biblioteca",
+        "add": "Aggiungi",
+        "preview": {
+          "label": "Guardando",
+          "ticks": "{key} lo spunta",
+          "wouldAdd": "Verranno aggiunti {books} · {size}",
+          "empty": "Vuoto al momento",
+          "merge": "Diversi libri condividono la stessa cartella: con l'opzione \"Cartella come libro\" ogni cartella di questo tipo diventa 1 solo libro.",
+          "split": "Audiolibri suddivisi in più parti: con l'opzione \"File come libro\" ogni parte diventerà un libro a sé stante."
+        },
+        "totals": {
+          "books": "{count, plural, one {# libro} other {# libri}} · {size}",
+          "booksOnly": "{count, plural, one {# libro} other {# libri}}",
+          "shared": "{count} presenti anche in altre biblioteche",
+          "organize": "Organizza come",
+          "organizeLabel": "Organizzazione",
+          "segmentBooks": "{count, plural, one {# libro} other {# libri}}",
+          "folderTitle": "Ogni cartella che contiene libri è un libro",
+          "fileTitle": "Ciascun file è un libro",
+          "locked": "{mode}, bloccata sin dalla creazione di {name}"
         }
+      },
+      "reason": {
+        "denied": "BookOrbit non può leggere questa cartella. Concedi i permessi di lettura all'utente con cui viene eseguito BookOrbit e riprova.",
+        "appData": "BookOrbit memorizza qui copertine, cache e plugin. Scegli invece la cartella che contiene i tuoi libri.",
+        "own": "{name} è già in questa biblioteca.",
+        "ownCovered": "Questa libreria accede già a {path}, che include questa cartella.",
+        "included": "Inclusa perché hai selezionato {path}."
+      },
+      "notice": {
+        "folded": "{path} include {count, plural, one {{name}} other {# cartelle selezionate}}, quindi {count, plural, one {è stata accorpata} other {sono state accorpate}} al suo interno.",
+        "range": "Selezionate {count, plural, one {# cartella} other {# cartelle}}, {from} a {to}.",
+        "removed": "Rimossa {name}",
+        "leftOut": "{name} è diventato {count, plural, one {# cartella} other {# cartelle}} accanto alle altre biblioteche",
+        "modeFile": "Passato a \"File come Libro\"; l'impostazione di scansione della libreria si adegua di conseguenza",
+        "modeFolder": "Passato a \"Cartella come libro\"; l'impostazione di scansione della libreria si adegua di conseguenza",
+        "created": "{path} creata e selezionata.",
+        "createdOnly": "{path} creata.",
+        "undo": "Annulla"
+      },
+      "keys": {
+        "space": "Spazio",
+        "tab": "Tab",
+        "escape": "Esc"
+      },
+      "footer": {
+        "hints": "{move} muovi {fold} raggruppa {tick} spunta {range} clicca per un intervallo {find} cerca",
+        "add": "Aggiungi cartelle",
+        "addCount": "Aggiungi {count, plural, one {# cartella} other {# cartelle}}",
+        "addShort": "Aggiungi",
+        "addShortCount": "Aggiungi {count}",
+        "nothingPicked": "Nessun elemento selezionato",
+        "seePlan": "Visualizza il piano"
+      },
+      "divider": {
+        "label": "Ridimensiona il piano",
+        "title": "Trascina per ridimensionare. Dppio clic per reimpostare."
       }
     },
     "destination": {
@@ -12533,6 +12846,50 @@
       "hideControls": "Nascondi i controlli",
       "stop": "Interrompe la narrazione",
       "error": "Errore di riproduzione della narrazione"
+    }
+  },
+  "readingHistory": {
+    "title": "Cronologia",
+    "toolbar": {
+      "list": "Elenco",
+      "covers": "Copertine",
+      "listView": "Vista a elenco",
+      "coversView": "Vista copertine",
+      "oneBook": "Un libro",
+      "clearBook": "Mostra tutti i libri, non solo {title}"
+    },
+    "month": {
+      "undated": "Nessuna data di fine",
+      "reads": "{count, plural, one {# lettura} other {# letture}}",
+      "rereads": "{count, plural, one {# rilettura} other {# riletture}}",
+      "hours": "{hours} ore"
+    },
+    "duration": {
+      "underMinute": "<1 min",
+      "minutes": "{minutes} min",
+      "hoursMinutes": "{hours} ore {minutes} m"
+    },
+    "row": {
+      "untitled": "Senza titolo",
+      "noDate": "Senza data",
+      "readNumberTitle": "{count, plural, one {Finito una volta} other {Finito # volte}}",
+      "abandoned": "Abbandonato",
+      "abandonedAt": "Abbandonato a {percent}",
+      "skimmed": "Sfogliato",
+      "removed": "Rimosso dalla biblioteca",
+      "removedShort": "Rimosso",
+      "removedTitle": "Eliminato dalla libreria il {date}. Questa lettura rimane nella tua cronologia.",
+      "sameDay": "Stesso giorno",
+      "startedSpan": "Iniziato {date} · {count, plural, one {# giorno} other {# giorni}}",
+      "finishOnly": "Solo data di fine",
+      "noDates": "Nessuna data registrata",
+      "sessions": "{count, plural, one {# sessione} other {# sessioni}}",
+      "sessionsTime": "{sessions} · {time}",
+      "sourcesMore": "{names} +{count}",
+      "highlights": "{count, plural, one {# evidenziazione} other {# evidenziazioni}}"
+    },
+    "links": {
+      "chartHint": "Seleziona un mese per vederne le letture nella cronologia"
     }
   },
   "scanner": {
@@ -13704,7 +14061,7 @@
       "groups": "Gruppi",
       "templates": "Modelli",
       "preferences": "Preferenze",
-      "history": "Storia"
+      "history": "Cronologia"
     },
     "metadata": {
       "providers": "Fornitori",
@@ -13743,7 +14100,8 @@
     "bookRequests": "Richieste",
     "bookRequestDetail": "Richiesta",
     "bookRequestReleases": "Scegli una versione",
-    "tts": "Sintesi vocale"
+    "tts": "Sintesi vocale",
+    "readingHistory": "Cronologia di lettura"
   },
   "tts": {
     "readerControls": {
