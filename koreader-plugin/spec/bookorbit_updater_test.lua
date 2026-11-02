@@ -303,3 +303,32 @@ do -- a zip missing main.lua is rejected before the swap
 end
 
 print("bookorbit_updater_test.lua: ok")
+
+-- Automatic failures back off without suppressing an explicit manual check.
+do
+    package.loaded["ui/network/manager"].isConnected = function() return true end
+    package.loaded["bookorbit_sweep"].isRunning = function() return false end
+    package.loaded["bookorbit_book_sync"].isRunning = function() return false end
+    local calls, paints = 0, 0
+    local plugin = {PLUGIN_VERSION="2.5.1", settings={}, catalog_browser={}}
+    function plugin:isLoggedIn() return true end
+    function plugin:newClient() return {getPluginVersion=function() calls=calls+1;return nil,"offline" end} end
+    BookOrbitUpdater.install(plugin)
+    plugin:maybeCheckForUpdate(false)
+    plugin:maybeCheckForUpdate(false)
+    assertEqual(calls,1,"failed automatic checks have a cooldown")
+    -- Interactive bypass reaches the request; stub only its response handler.
+    local handler = plugin.handleUpdateVersionResponse
+    plugin.handleUpdateVersionResponse = function() end
+    plugin.newClient = function() return {getPluginVersion=function() calls=calls+1;return {pluginVersion="2.5.1"} end} end
+    plugin:maybeCheckForUpdate(true)
+    assertEqual(calls,2,"manual checks bypass failure cooldown")
+    assertEqual(plugin._update_retry_at,nil,"successful checks clear cooldown")
+    plugin.handleUpdateVersionResponse=handler
+    G_reader_settings={flush=function()end}
+    plugin._bookorbit_hub={refreshView=function()paints=paints+1 end}
+    plugin:handleUpdateVersionResponse({pluginVersion="2.5.1"},false,false)
+    plugin:handleUpdateVersionResponse({pluginVersion="2.5.1"},false,false)
+    assertEqual(paints,1,"unchanged update version does not repaint the dashboard")
+end
+print("Update cooldown and repaint tests passed")

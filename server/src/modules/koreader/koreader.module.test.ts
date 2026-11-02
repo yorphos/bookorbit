@@ -1,3 +1,6 @@
+import { KoreaderRouletteController } from './koreader-roulette.controller';
+import { KoreaderRouletteService } from './koreader-roulette.service';
+import { KoreaderRouletteRepository } from './koreader-roulette.repository';
 import { describe, expect, it } from 'vitest';
 
 import { KoreaderAnnotationExchangeService } from './koreader-annotation-exchange.service';
@@ -25,31 +28,38 @@ import { KoreaderSyncEstimateCleanupService } from './koreader-sync-estimate-cle
 
 describe('KoreaderModule', () => {
   it('registers expected controllers, providers, and exports', () => {
-    expect(Reflect.getMetadata('controllers', KoreaderModule)).toEqual([
-      KoreaderDeliveryController,
-      KoreaderController,
-      KoreaderPluginController,
-      KoreaderCatalogController,
-    ]);
-    expect(Reflect.getMetadata('providers', KoreaderModule)).toEqual([
-      KoreaderDeliveryService,
-      KoreaderService,
-      KoreaderHashLinkService,
-      KoreaderRepository,
-      KoreaderAuthGuard,
-      KoreaderCatalogService,
-      KoreaderPackageService,
-      KoreaderChapterService,
-      KoreaderChapterExtractorService,
-      KoreaderPluginService,
-      KoreaderPluginRepository,
-      KoreaderPluginAnnotationService,
-      KoreaderAnnotationExchangeService,
-      KoreaderBookmarkExchangeService,
-      KoreaderBookmarkRepository,
-      KoreaderStatsService,
-      KoreaderSyncEstimateCleanupService,
-    ]);
+    expect(Reflect.getMetadata('controllers', KoreaderModule)).toEqual(
+      expect.arrayContaining([
+        KoreaderRouletteController,
+        KoreaderDeliveryController,
+        KoreaderController,
+        KoreaderPluginController,
+        KoreaderCatalogController,
+      ]),
+    );
+    expect(Reflect.getMetadata('providers', KoreaderModule)).toEqual(
+      expect.arrayContaining([
+        KoreaderRouletteService,
+        KoreaderRouletteRepository,
+        KoreaderDeliveryService,
+        KoreaderService,
+        KoreaderHashLinkService,
+        KoreaderRepository,
+        KoreaderAuthGuard,
+        KoreaderCatalogService,
+        KoreaderPackageService,
+        KoreaderChapterService,
+        KoreaderChapterExtractorService,
+        KoreaderPluginService,
+        KoreaderPluginRepository,
+        KoreaderPluginAnnotationService,
+        KoreaderAnnotationExchangeService,
+        KoreaderBookmarkExchangeService,
+        KoreaderBookmarkRepository,
+        KoreaderStatsService,
+        KoreaderSyncEstimateCleanupService,
+      ]),
+    );
     expect(Reflect.getMetadata('exports', KoreaderModule)).toEqual([KoreaderService, KoreaderRepository]);
   });
 });

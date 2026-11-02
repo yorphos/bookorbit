@@ -1,0 +1,158 @@
+import { Test } from '@nestjs/testing';
+import { ForbiddenException, ValidationPipe } from '@nestjs/common';
+import { Permission } from '@bookorbit/types';
+import { PermissionService } from '../../common/services/permission.service';
+import type { RequestUser } from '../../common/types/request-user';
+import { CollectionService } from '../collection/collection.service';
+import { UserPreferencesRepository } from '../user-preferences/user-preferences.repository';
+import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
+import { BookRequestService } from '../book-request/book-request.service';
+import { KoreaderCatalogService } from './koreader-catalog.service';
+import { KoreaderRequestsService } from './koreader-requests.service';
+import { KoreaderHubService } from './koreader-hub.service';
+import { KoreaderWishlistBookDto, KoreaderWishlistKeyDto, KoreaderCollectionBookDto } from './dto/koreader-hub.dto';
+
+describe('KOReader home, wishlist and collections', () => {
+  const user = { id: 4, permissions: [Permission.BookRequestAccess], isSuperuser: false } as RequestUser;
+  const catalog = { getDashboard: vi.fn(), getBooksPage: vi.fn(), getBookDetail: vi.fn() };
+  const requests = { list: vi.fn() };
+  const collections = { findAll: vi.fn(), addBooks: vi.fn(), removeBooks: vi.fn() };
+  const preferences = { findByCategoryPrefix: vi.fn(), upsert: vi.fn(), delete: vi.fn() };
+  const external = { search: vi.fn() };
+  const core = { checkAvailability: vi.fn() };
+  let service: KoreaderHubService;
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    const module = await Test.createTestingModule({
+      providers: [
+        KoreaderHubService,
+        PermissionService,
+        { provide: KoreaderCatalogService, useValue: catalog },
+        { provide: KoreaderRequestsService, useValue: requests },
+        { provide: CollectionService, useValue: collections },
+        { provide: UserPreferencesRepository, useValue: preferences },
+        { provide: KoreaderExternalCatalogService, useValue: external },
+        { provide: BookRequestService, useValue: core },
+      ],
+    }).compile();
+    service = module.get(KoreaderHubService);
+    catalog.getDashboard.mockResolvedValue({ continueReading: [], discover: [{ id: 1 }], totalBooks: 1 });
+    catalog.getBooksPage.mockResolvedValue({ items: [] });
+    requests.list.mockResolvedValue({ items: [] });
+    external.search.mockResolvedValue({ items: [] });
+    catalog.getBookDetail.mockResolvedValue({ genres: ['Science fiction'] });
+    core.checkAvailability.mockImplementation((items) =>
+      Promise.resolve(items.map(() => ({ ownedBookId: null, existingRequestId: null, existingRequestStatus: null, alreadySubscribed: false }))),
+    );
+  });
+  it('never falls back to owned books when external discovery fails', async () => {
+    external.search.mockRejectedValue(new Error('offline'));
+    requests.list.mockRejectedValue(new Error('offline'));
+    expect(await service.home(user)).toMatchObject({
+      recommendations: [],
+      partial: true,
+      requestsUnavailable: true,
+      recommendationReason: 'Discovery temporarily unavailable',
+    });
+  });
+  it('uses authors and genres from the last three read books, deduplicates, and excludes owned/pending works', async () => {
+    const seeds = [2, 3, 4].map((id) => ({ id, title: 'Seed ' + id, authors: ['Author ' + id], lastReadAt: '2026-11-01' }));
+    catalog.getBooksPage.mockImplementation((_user, query) => Promise.resolve({ items: query.sort === 'recently_read' ? seeds : [] }));
+    external.search.mockImplementation((q) =>
+      Promise.resolve({
+        items: [
+          { title: q, authors: ['Writer'] },
+          { title: 'Owned', authors: ['Writer'] },
+          { title: 'Pending', authors: ['Writer'] },
+        ],
+      }),
+    );
+    core.checkAvailability.mockImplementation((items) =>
+      Promise.resolve(
+        items.map((book) => ({ ownedBookId: book.title === 'Owned' ? 7 : null, existingRequestId: book.title === 'Pending' ? 8 : null })),
+      ),
+    );
+    const result = await service.home(user);
+    expect(external.search.mock.calls.map((call) => call[0])).toEqual(['Author 2', 'Science fiction', 'Author 3', 'Author 4']);
+    expect(result.recommendations.map((book) => book.title)).toEqual(['Author 2', 'Science fiction', 'Author 3', 'Author 4']);
+    expect(result.recommendationSeeds.map((book) => book.id)).toEqual([2, 3, 4]);
+    expect(core.checkAvailability).toHaveBeenCalledWith(expect.any(Array), user);
+  });
+  it('loads Discover without dashboard counts, recent arrivals or the request inbox', async () => {
+    await service.discovery(user);
+    expect(catalog.getDashboard).not.toHaveBeenCalled();
+    expect(requests.list).not.toHaveBeenCalled();
+    expect(catalog.getBooksPage).toHaveBeenCalledTimes(1);
+    expect(catalog.getBooksPage).toHaveBeenCalledWith(user, expect.objectContaining({ sort: 'recently_read', size: 3 }));
+  });
+  it('rechecks ownership on refresh and fails closed when that check is unavailable', async () => {
+    external.search.mockResolvedValue({ items: [{ title: 'New book', authors: ['Writer'] }] });
+    expect((await service.home(user)).recommendations).toHaveLength(1);
+    core.checkAvailability.mockResolvedValue([{ ownedBookId: 7, existingRequestId: null }]);
+    expect((await service.home(user)).recommendations).toEqual([]);
+    core.checkAvailability.mockRejectedValue(new Error('offline'));
+    expect(await service.home(user)).toMatchObject({ recommendations: [], partial: true });
+  });
+  it('uses popular external books without inventing reading history', async () => {
+    catalog.getBooksPage.mockResolvedValue({ items: [{ id: 1, title: 'Never read', authors: [], lastReadAt: null }] });
+    const result = await service.home(user);
+    expect(external.search).toHaveBeenCalledWith('Fiction', 'subject', 1, undefined, 'popular', { language: 'en' });
+    expect(result.recommendationSeeds).toEqual([]);
+    expect(result.recommendationReason).toBe('Popular books outside your library');
+  });
+  it('does not call request APIs for an ordinary reader without request access', async () => {
+    const reader = { ...user, permissions: [] };
+    expect((await service.home(reader)).canRequest).toBe(false);
+    preferences.findByCategoryPrefix.mockResolvedValue([{ category: 'koreader-wishlist:abc', data: { title: 'Alice' } }]);
+    await service.wishlist(reader, 1);
+    expect(requests.list).not.toHaveBeenCalled();
+    expect(external.search).not.toHaveBeenCalled();
+    expect(core.checkAvailability).not.toHaveBeenCalled();
+  });
+  it('stores simultaneous additions independently and scopes every mutation to the caller', async () => {
+    const [alice, frankenstein] = await Promise.all([
+      service.saveWishlist(user, { title: 'Alice', authors: ['Lewis Carroll'] }),
+      service.saveWishlist(user, { title: 'Frankenstein', authors: ['Mary Shelley'] }),
+    ]);
+    expect(alice.key).not.toBe(frankenstein.key);
+    const other = { ...user, id: 9 };
+    expect(await service.saveWishlist(other, { title: 'Alice', authors: ['Lewis Carroll'] })).toEqual(alice);
+    expect(preferences.upsert.mock.calls.map((call) => call[0])).toEqual([4, 4, 9]);
+    await service.removeWishlist(other, alice.key);
+    expect(preferences.delete).toHaveBeenCalledWith(9, 'koreader-wishlist:' + alice.key);
+  });
+  it('paginates wishlist metadata but recomputes ownership and request status', async () => {
+    preferences.findByCategoryPrefix.mockResolvedValue(
+      Array.from({ length: 21 }, (_, i) => ({ category: 'koreader-wishlist:' + i, data: { title: 'Book ' + i } })),
+    );
+    core.checkAvailability.mockResolvedValue(Array.from({ length: 20 }, () => ({ ownedBookId: null })));
+    const first = await service.wishlist(user, 2);
+    expect(first.items).toHaveLength(20);
+    expect(first.hasMore).toBe(true);
+    expect(preferences.findByCategoryPrefix).toHaveBeenCalledWith(4, 'koreader-wishlist:', 21, 20);
+    core.checkAvailability.mockResolvedValue([{ ownedBookId: 17 }]);
+    expect((await service.wishlist(user, 2)).items[0].availability).toEqual({ ownedBookId: 17 });
+  });
+  it('rejects an inaccessible book before calling the collection writer', async () => {
+    catalog.getBookDetail.mockRejectedValue(new ForbiddenException());
+    await expect(service.addToCollection(user, 8, 20)).rejects.toThrow();
+    expect(collections.addBooks).not.toHaveBeenCalled();
+  });
+  it('preserves collection ownership enforcement for both additions and removals', async () => {
+    collections.addBooks.mockRejectedValue(new ForbiddenException('Cannot modify this collection'));
+    collections.removeBooks.mockRejectedValue(new ForbiddenException('Cannot modify this collection'));
+    await expect(service.addToCollection(user, 8, 20)).rejects.toThrow('Cannot modify');
+    await expect(service.removeFromCollection(user, 8, 20)).rejects.toThrow('Cannot modify');
+    expect(collections.addBooks).toHaveBeenCalledWith(8, { bookIds: [20] }, user);
+    expect(collections.removeBooks).toHaveBeenCalledWith(8, { bookIds: [20] }, user);
+  });
+  it('rejects client-selected identities, acquisition URLs and arbitrary preference keys', async () => {
+    const pipe = new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true });
+    await expect(pipe.transform({ title: 'Alice', userId: 9 }, { type: 'body', metatype: KoreaderWishlistBookDto })).rejects.toThrow();
+    await expect(
+      pipe.transform({ title: 'Alice', downloadUrl: 'https://example.org/book.epub' }, { type: 'body', metatype: KoreaderWishlistBookDto }),
+    ).rejects.toThrow();
+    await expect(pipe.transform({ key: '../preferences' }, { type: 'param', metatype: KoreaderWishlistKeyDto })).rejects.toThrow();
+    await expect(pipe.transform({ bookId: 1, userId: 9 }, { type: 'body', metatype: KoreaderCollectionBookDto })).rejects.toThrow();
+  });
+});

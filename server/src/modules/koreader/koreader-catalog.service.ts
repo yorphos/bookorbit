@@ -1252,6 +1252,7 @@ export class KoreaderCatalogService {
           `${title}.${extension}`;
         return {
           id: file.id,
+          filename: file.filename ?? `${title}.${extension}`,
           format: extension,
           role: file.role,
           downloadVariant,
@@ -1531,6 +1532,8 @@ export class KoreaderCatalogService {
     collectionId?: number;
     smartScopeId?: number;
     author?: string;
+    genre?: string;
+    language?: string;
     series?: string;
     seriesId?: number;
     q?: string;
@@ -1545,6 +1548,8 @@ export class KoreaderCatalogService {
       ...(query.collectionId !== undefined ? { collectionId: query.collectionId } : {}),
       ...(query.smartScopeId !== undefined ? { smartScopeId: query.smartScopeId } : {}),
       ...(query.author ? { author: query.author } : {}),
+      ...(query.genre ? { genre: query.genre } : {}),
+      ...(query.language ? { language: query.language } : {}),
       ...(query.seriesId !== undefined ? { seriesId: query.seriesId } : {}),
       ...(query.series ? { series: query.series } : {}),
       ...(query.q?.trim() ? { q: query.q.trim() } : {}),

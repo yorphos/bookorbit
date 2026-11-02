@@ -2007,6 +2007,17 @@ describe('BookDockFinalizeService', () => {
       expect(metadataService.saveExtractedCoverBytes).toHaveBeenCalledWith(42, Buffer.from('epub-art'), 'ebook');
     });
 
+    it.each([
+      [{ title: 'Book' }, 'Requested', '2'],
+      [{ title: 'Book', seriesName: 'Embedded', seriesIndex: '4' }, 'Embedded', '4'],
+    ])('preserves embedded series and fills missing requested series: %j', async (embedded, name, index) => {
+      const { service, repo } = makeService();
+      repo.findById.mockResolvedValue(makeRow({ id: 9, embeddedMetadata: embedded, selectedMetadata: null, fetchedMetadata: null }));
+      const finalizeFile = vi.spyOn(service as any, 'finalizeFile').mockResolvedValue({ fileId: 9, fileName: 'f', success: false });
+      await service.finalizeManagedFile(9, { requestedSeries: { name: 'Requested', index: 2 } });
+      expect(finalizeFile.mock.calls[0][0].selectedMetadata).toMatchObject({ seriesName: name, seriesIndex: index });
+    });
+
     it('files a managed row with the looked-up cover kept apart from what it was told to file with', async () => {
       const { service, repo } = makeService();
       repo.findById.mockResolvedValue(

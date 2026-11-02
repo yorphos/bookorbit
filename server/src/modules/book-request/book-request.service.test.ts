@@ -2463,3 +2463,79 @@ describe('BookRequestService.markFulfilled for one half of a pair', () => {
     expect(companions.handOn).toHaveBeenCalledWith(expect.objectContaining({ id: 10 }), 42);
   });
 });
+
+describe('BookRequestService replacement editions', () => {
+  const placement = {
+    bookId: 42,
+    status: 'present',
+    libraryId: 1,
+    libraryFolderId: 2,
+    organizationMode: 'book_per_folder',
+    folderPath: '/books/Dune',
+  };
+  function replacementService(extra: Record<string, unknown> = {}) {
+    return makeService({
+      repo: {
+        findById: vi.fn().mockResolvedValue(joined({ status: 'available', matchedBookId: 42, language: 'ca', isbn13: '9780441013593' })),
+        findBookPlacement: vi.fn().mockResolvedValue(placement),
+        findBookMediaKinds: vi.fn().mockResolvedValue(new Set(['ebook'])),
+        ...extra,
+      },
+    });
+  }
+  it('creates a separate English request under ordinary approval while retaining the old book', async () => {
+    const { service, repo, dedupe, automation } = replacementService();
+    await service.requestReplacement(10, 'en', user());
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'pending',
+        language: 'en',
+        targetBookId: 42,
+        matchedBookId: 42,
+        targetLibraryId: 1,
+        targetFolderId: 2,
+        isbn13: null,
+        selfServe: false,
+      }),
+      expect.any(Array),
+    );
+    expect(dedupe.findOwnedBookFor).not.toHaveBeenCalled();
+    expect(repo.updateIf).not.toHaveBeenCalled();
+    expect(automation.considerRequest).not.toHaveBeenCalled();
+  });
+  it('does not switch a replacement to another active request language', async () => {
+    const { service, repo, dedupe } = replacementService();
+    dedupe.findActiveRequestFor.mockResolvedValue(row({ status: 'approved', language: 'ca' }));
+    await expect(service.requestReplacement(10, 'en', user())).rejects.toThrow('different language');
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(repo.addSubscriber).not.toHaveBeenCalled();
+  });
+  it('leaves an auto-approved replacement ready for manual selection', async () => {
+    const { service, repo, automation } = replacementService();
+    await service.requestReplacement(10, 'eng', user({ permissions: [Permission.BookRequestAccess, Permission.BookRequestAutoApprove] }));
+    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'approved', language: 'en' }), expect.any(Array));
+    expect(automation.considerRequest).not.toHaveBeenCalled();
+  });
+  it('creates a direct library replacement without running automatic acquisition', async () => {
+    const { service, repo, automation } = replacementService();
+    await service.requestBookReplacement(
+      42,
+      { title: 'A Christmas Carol', authors: ['Charles Dickens'], mediaKind: 'ebook', language: 'en' },
+      user({ permissions: [Permission.BookRequestAccess, Permission.BookRequestAutoApprove] }),
+    );
+    expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ status: 'approved', targetBookId: 42, matchedBookId: 42 }), expect.any(Array));
+    expect(automation.considerRequest).not.toHaveBeenCalled();
+  });
+  it('checks the old book is still reachable', async () => {
+    const { service, repo } = replacementService({ findBookPlacement: vi.fn().mockResolvedValue({ ...placement, libraryId: 999 }) });
+    await expect(service.requestReplacement(10, 'en', user())).rejects.toThrow('reach');
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+  it('refuses active requests and invalid languages', async () => {
+    const { service, repo } = replacementService();
+    await expect(service.requestReplacement(10, 'xx', user())).rejects.toThrow('language');
+    repo.findById.mockResolvedValue(joined({ status: 'downloading', matchedBookId: 42 }));
+    await expect(service.requestReplacement(10, 'en', user())).rejects.toThrow('available');
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+});

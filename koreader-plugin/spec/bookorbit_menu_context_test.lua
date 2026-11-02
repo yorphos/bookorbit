@@ -70,7 +70,7 @@ local function newPlugin(opts)
         calls = calls,
     }
     MainMenu.install(plugin)
-    for _, name in ipairs({ "browseCatalog", "openSignIn", "openBookSheet", "openSettings", "openSyncStatus", "startSweep", "applyUpdate", "customizeHome" }) do
+    for _, name in ipairs({ "onReturnToBookOrbit", "browseCatalog", "openSignIn", "openBookSheet", "openSettings", "openSyncStatus", "startSweep", "applyUpdate", "customizeHome" }) do
         plugin[name] = function(_, ...) table.insert(calls, { name, ... }) end
     end
     return plugin, calls
@@ -89,12 +89,12 @@ end
 -- The file browser's Tools entry: open BookOrbit, or its settings.
 local plugin, calls = newPlugin()
 local items = menuItems(plugin)
-assertEqual(texts(items.bookorbit.sub_item_table), "Open BookOrbit|Settings", "the Tools entry is two rows in the file browser")
+assertEqual(texts(items.bookorbit.sub_item_table), "Open BookOrbit|Find and request books|Settings", "the Tools entry exposes discovery directly")
 assertEqual(items.bookorbit.sorting_hint, "tools", "the entry still falls back to the Tools menu")
 
 -- In a book it adds This book.
 local reader = newPlugin({ reader = true })
-assertEqual(texts(menuItems(reader).bookorbit.sub_item_table), "Open BookOrbit|This book|Settings", "a book adds This book")
+assertEqual(texts(menuItems(reader).bookorbit.sub_item_table), "Return to BookOrbit|Find and request books|This book|Settings", "a book adds This book")
 
 -- The menu bar tab is a button: never remembered, never a list.
 local tab = items.bookorbit_tab
@@ -131,7 +131,7 @@ book.ui.menu.onCloseReaderMenu = function() table.insert(book_calls, { "close_re
 menuItems(book).bookorbit_tab.callback()
 runTicks()
 assertEqual(book_calls[1][1], "close_reader_menu", "the reader menu closes first")
-assertEqual(book_calls[2][1], "openBookSheet", "in a book the tab opens This book")
+assertEqual(book_calls[2][1], "onReturnToBookOrbit", "in a book the tab returns to BookOrbit")
 
 local out, out_calls = newPlugin({ logged_out = true })
 menuItems(out).bookorbit_tab.callback()

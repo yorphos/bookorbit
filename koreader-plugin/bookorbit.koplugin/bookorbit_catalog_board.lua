@@ -984,6 +984,9 @@ local LINK_ACTIONS = {
     scopes = function(self) self:loadSection("smart-scopes") end,
     device = function(self) self:loadOnDevice() end,
     search = function(self) self:promptSearch({}) end,
+    requests = function(self)
+        if self._manager then self._manager:openBookRequests() end
+    end,
 }
 
 function CatalogBoard:boardOpenLink(link)

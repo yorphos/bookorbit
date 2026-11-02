@@ -15,6 +15,24 @@ function metadata(overrides: Partial<BookDockMetadata> = {}): BookDockMetadata {
 }
 
 describe('verifyAgainstRequest', () => {
+  it('holds a Catalan file even when fetched English metadata and ISBN match', () => {
+    const outcome = verifyAgainstRequest(
+      request({ language: 'en', isbn13: '9780441013593' }),
+      metadata({ language: 'en', isbn13: '9780441013593' }),
+      metadata({ language: 'ca', isbn13: '9780441013593' }),
+    );
+    expect(outcome.passed).toBe(false);
+    expect(outcome.reason).toContain('declares ca');
+  });
+  it('preserves the existing audiobook verification policy', () => {
+    expect(verifyAgainstRequest(request({ language: 'en', mediaKind: 'audiobook' }), metadata(), metadata()).passed).toBe(true);
+  });
+  it('holds unknown embedded language instead of trusting a catalog language', () => {
+    expect(verifyAgainstRequest(request({ language: 'en' }), metadata({ language: 'en' }), metadata()).passed).toBe(false);
+  });
+  it('accepts matching embedded language aliases even when fetched metadata names a translation', () => {
+    expect(verifyAgainstRequest(request({ language: 'eng' }), metadata({ language: 'ca' }), metadata({ language: 'en-GB' })).passed).toBe(true);
+  });
   it('passes on an exact ISBN13 match without looking at anything else', () => {
     const outcome = verifyAgainstRequest(
       request({ title: 'Dune', isbn13: '978-0-441-01359-3' }),
@@ -330,6 +348,19 @@ describe('verifyAgainstRequest comparison rows', () => {
 });
 
 describe('RequestVerificationService review surface', () => {
+  it('gives an approved replacement its own filename and keeps the existing book', async () => {
+    const { service, finalizeService, companions } = makeService({ requestRow: { targetBookId: 42, matchedBookId: 42, language: 'en' } });
+    const join = { libraryId: 2, folderId: 3, joinBook: { bookId: 42, folderPath: '/books/Dune', coverUrl: null } };
+    companions.resolveJoin.mockResolvedValue(join as never);
+    await service.fileHeldImport(7, { id: 9 } as never);
+    expect(finalizeService.finalizeManagedFile).toHaveBeenCalledWith(100, {
+      libraryId: 2,
+      folderId: 3,
+      joinBook: join.joinBook,
+      targetFileName: 'Dune (en, replacement 7-100).epub',
+    });
+  });
+
   const heldRequest = { ...request(), id: 7, status: 'needs_review', bookDockFileId: 100, targetLibraryId: 2, targetFolderId: 3 };
 
   function makeService(

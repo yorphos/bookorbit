@@ -611,7 +611,7 @@ export interface BookRequestSummary {
  * Columns the request list can be ordered by. Shared so the table cannot offer a sort the query
  * does not know how to build, and so a rename breaks the client at compile time.
  */
-export const BOOK_REQUEST_SORT_FIELDS = ["createdAt", "title", "mediaKind", "requester", "status"] as const;
+export const BOOK_REQUEST_SORT_FIELDS = ["createdAt", "updatedAt", "title", "mediaKind", "requester", "status"] as const;
 export type BookRequestSortField = (typeof BOOK_REQUEST_SORT_FIELDS)[number];
 
 export const BOOK_REQUEST_SORT_DIRECTIONS = ["asc", "desc"] as const;

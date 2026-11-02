@@ -139,6 +139,15 @@ export class KoreaderCatalogBooksQueryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
+  genre?: string;
+
+  @IsOptional()
+  @IsIn(['en', 'fr', 'es', 'de', 'it', 'pt'])
+  language?: string;
+
+  @IsOptional()
+  @IsString()
   series?: string;
 
   @IsOptional()
@@ -222,6 +231,15 @@ export class KoreaderCatalogManifestQueryDto {
   @IsOptional()
   @IsString()
   author?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  genre?: string;
+
+  @IsOptional()
+  @IsIn(['en', 'fr', 'es', 'de', 'it', 'pt'])
+  language?: string;
 
   @IsOptional()
   @IsString()

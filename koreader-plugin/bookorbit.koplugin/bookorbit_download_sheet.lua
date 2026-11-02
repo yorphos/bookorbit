@@ -69,6 +69,10 @@ function DownloadSheet.editions(files)
             })
         end
     end
+    for i, edition in ipairs(out) do
+        local filename = edition.file.filename
+        if filename and filename ~= "" then edition.sub = filename .. " / " .. edition.sub end
+    end
     return out
 end
 
@@ -96,6 +100,11 @@ local function target(page)
     local e = page.editions[page.choice]
     local f = e.file
     local ext = string.lower(f.format or "bin")
+    if page.replace_path then
+        local folder, name = page.replace_path:match("^(.*)/([^/]+)$")
+        local stem, old_ext = name:match("^(.*)%.([^%.]+)$")
+        return folder, stem or name, old_ext or ext, page.replace_path
+    end
     local folder, name = page.catalog:getLocalDownloadPreview(page.filename or CatalogUtil.safeFilenameBase(page.detail), ext, f.devicePath, page.filename ~= nil)
     return folder, name, ext, folder .. "/" .. name .. "." .. ext
 end
@@ -255,13 +264,20 @@ local function start(page)
     local catalog = page.catalog
     local e = page.editions[page.choice]
     local function go(detail, file)
+        if page.replace_path then
+            local old_ext = page.replace_path:match("%.([^%.]+)$")
+            if not old_ext or old_ext:lower() ~= string.lower(file.format or "") then
+                require("bookorbit_toast").error(_("Choose the same file format to swap this copy, or use Download options to save a separate file."))
+                return
+            end
+        end
         page.detail = detail
         local path = select(4, target(page))
         page.state, page.progress = "progress", nil
         page.dismiss_outside = false
         page.local_path = path
         page:refresh()
-        catalog:downloadFile(catalog:getLocalDownloadPath(page.filename or CatalogUtil.safeFilenameBase(detail), string.lower(file.format or "bin"), file.devicePath, page.filename ~= nil), detail, file, reporter(page))
+        catalog:downloadFile(path, detail, file, reporter(page))
     end
     if not page.needs_refresh and (e.variant == nil or e.variant == e.file.downloadVariant) then
         return go(page.detail, e.file)
@@ -305,6 +321,7 @@ local function rename(page)
         end,
         on_submit = function(value)
             if page.closed then return end
+            page.replace_path = nil
             page.filename = value
             page:refresh()
         end,
@@ -318,6 +335,7 @@ local function onAction(page, action)
         page.choice = action.index
         page:refresh()
     elseif kind == "folder" then
+        page.replace_path = nil
         catalog:chooseDownloadDir(function() if not page.closed then page:refresh() end end)
     elseif kind == "rename" then
         rename(page)
@@ -342,6 +360,10 @@ DownloadSheet.reporter = reporter
 -- has already started; report to DownloadSheet.reporter(page)).
 function DownloadSheet.open(catalog, detail, opts)
     opts = opts or {}
+    if opts.replace_path and not require("bookorbit_download_transfer").isInsideRoot(catalog:getCurrentDownloadDir(), opts.replace_path) then
+        require("bookorbit_toast").error(_("This copy is outside your BookOrbit download folder. Use Download options to save another copy."))
+        return
+    end
     local editions = DownloadSheet.editions(catalog:supportedFiles(detail))
     if #editions == 0 then
         require("bookorbit_toast").error(_("No file this reader can open"))
@@ -357,6 +379,7 @@ function DownloadSheet.open(catalog, detail, opts)
         editions = editions,
         choice = DownloadSheet.indexOf(editions, first and first.id, opts.variant or (first and first.downloadVariant)),
         filename = opts.filename,
+        replace_path = opts.replace_path,
         state = opts.progress and "progress" or "choose",
         dismiss_outside = not opts.progress,
     }

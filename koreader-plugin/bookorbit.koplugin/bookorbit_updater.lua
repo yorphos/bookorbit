@@ -223,6 +223,7 @@ end
 -- onto the plugin controller as regular methods.
 
 local UPDATE_CHECK_INTERVAL = 24 * 60 * 60
+local UPDATE_RETRY_INTERVAL = 15 * 60
 
 -- Assigned from the plugin class on install (the version literal lives in
 -- main.lua, where the server's package endpoint parses it from).
@@ -266,13 +267,14 @@ function UpdateCheck:maybeCheckForUpdate(interactive)
     if BookOrbitSweep.isRunning() or BookOrbitBookSync.isRunning() then return end
 
     local now = os.time()
-    if not interactive and now - (self.settings.update_check_last_at or 0) < UPDATE_CHECK_INTERVAL then
+    if not interactive and (now < (self._update_retry_at or 0) or now - (self.settings.update_check_last_at or 0) < UPDATE_CHECK_INTERVAL) then
         return
     end
 
     self._checking_update = true
     local body, err = self:newClient():getPluginVersion()
     self._checking_update = false
+    self._update_retry_at = not body and (now + UPDATE_RETRY_INTERVAL) or nil
 
     if not body then
         if self.recordSyncError then
@@ -331,8 +333,10 @@ function UpdateCheck:handleUpdateVersionResponse(body, interactive, prompt_allow
         return
     end
 
+    local previous_latest = self.settings.update_latest_version
     self.settings.update_latest_version = plugin_latest
     G_reader_settings:flush()
+    if self._bookorbit_hub and previous_latest ~= plugin_latest then self._bookorbit_hub:refreshView() end
 
     if BookOrbitUpdater.isNewer(plugin_latest, PLUGIN_VERSION) ~= true then
         if interactive then

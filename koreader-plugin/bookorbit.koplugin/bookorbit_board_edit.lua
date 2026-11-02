@@ -25,6 +25,7 @@ local BoardEdit = {}
 -- The widgets a reader can add. Sizes are the codes in BoardLayout.sizeDims;
 -- the first is the size a new widget gets.
 BoardEdit.LIBRARY = {
+    { type = "link", name = function() return _("Book requests") end, desc = function() return _("Find missing books and follow your requests") end, sizes = { "S" }, tab = "library", new = true, props = { link = "requests" } },
     { type = "forecast", name = function() return _("Finish forecast") end, desc = function() return _("When your book ends at your pace") end, sizes = { "M", "S", "L" }, tab = "reading", new = true },
     { type = "heatmap", name = function() return _("Year in reading") end, desc = function() return _("One square a day for a whole year") end, sizes = { "XL", "L" }, tab = "stats", new = true },
     { type = "goalpace", name = function() return _("Goal pace") end, desc = function() return _("Ahead or behind on your yearly goal") end, sizes = { "M", "S" }, tab = "stats", new = true },

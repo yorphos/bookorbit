@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, like } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 import { DB } from '../../db';
@@ -10,6 +10,15 @@ type Db = NodePgDatabase<typeof schema>;
 @Injectable()
 export class UserPreferencesRepository {
   constructor(@Inject(DB) private readonly db: Db) {}
+
+  findByCategoryPrefix(userId: number, prefix: string, limit: number, offset: number) {
+    return this.db.query.userPreferences.findMany({
+      where: and(eq(schema.userPreferences.userId, userId), like(schema.userPreferences.category, prefix + '%')),
+      orderBy: [desc(schema.userPreferences.updatedAt), desc(schema.userPreferences.category)],
+      limit,
+      offset,
+    });
+  }
 
   findByCategory(userId: number, category: string) {
     return this.db.query.userPreferences.findFirst({

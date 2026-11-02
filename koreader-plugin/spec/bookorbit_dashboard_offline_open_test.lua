@@ -125,6 +125,15 @@ assertEqual(#opened, 1, "the auto-open opens the dashboard")
 assertEqual(opened[1], true, "the auto-open prefers the cached dashboard")
 assertEqual(waits, 0, "the auto-open does not wait for a connection")
 
+opened = {}
+plugin.ui = { document = {} }
+plugin:maybeAutoOpenCatalog("home")
+assertEqual(#opened, 1, "Home is the launch surface above a resumed reader")
+assertEqual(opened[1], true, "Home starts from cached content without forcing Wi-Fi")
+opened = {}
+plugin:maybeAutoOpenCatalog("filemanager")
+assertEqual(#opened, 0, "the optional filemanager-only mode still preserves a resumed reader")
+
 -- Logged out, nothing opens and the user is asked to sign in.
 opened = {}
 plugin.settings = {}

@@ -174,6 +174,10 @@ export class RequestFulfillmentService {
    * unremarkable from its own row; the first source having been asked and having said no is only
    * visible here.
    */
+  async findTriedReleaseKeys(requestId: number): Promise<Set<string>> {
+    return this.downloads.findTriedReleaseKeys(requestId);
+  }
+
   async listAttempts(requestId: number): Promise<BookRequestDownloadItem[]> {
     if (!(await this.requests.findById(requestId))) throw new NotFoundException('Book request not found');
     return (await this.downloads.findForRequest(requestId)).map(mapBookRequestDownload);

@@ -280,6 +280,8 @@ export interface KoreaderCatalogEntry {
 }
 
 export interface KoreaderCatalogFile {
+  /** Original basename, to distinguish multiple editions of the same format. */
+  filename?: string;
   fileHash?: string | null;
   sourceMediaOverlayAvailable?: boolean;
   narrationPlaybackAvailable?: boolean;

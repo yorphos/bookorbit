@@ -327,6 +327,14 @@ function BookOrbitCatalog:init()
     self.on_device_hydration_failures = 0
     self.dashboard_request_generation = 0
     self.catalog_closed = false
+    -- The discovery hub shares the catalog's delivery, sync, cover cache and
+    -- bulk-download controller without constructing a second full-screen menu.
+    if self.headless then
+        self.current_context = { mode = "hub" }
+        self.item_table = {}
+        self:refreshOnDevice()
+        return
+    end
     -- Construction stays local: the widget opens on the cached dashboard (or a
     -- placeholder) and the server refresh starts once it is interactive.
     self.item_table, self.current_context = self:initialDashboardContext()

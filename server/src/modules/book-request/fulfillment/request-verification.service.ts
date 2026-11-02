@@ -8,8 +8,13 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { access } from 'fs/promises';
-import { basename } from 'path';
-import { DEFAULT_BOOK_REQUEST_AUTOMATION_SETTINGS, NotificationType, UNSETTLED_BOOK_REQUEST_DOWNLOAD_STATUSES } from '@bookorbit/types';
+import { basename, extname } from 'path';
+import {
+  DEFAULT_BOOK_REQUEST_AUTOMATION_SETTINGS,
+  NotificationType,
+  toRequestLanguage,
+  UNSETTLED_BOOK_REQUEST_DOWNLOAD_STATUSES,
+} from '@bookorbit/types';
 import type {
   BookDockMetadata,
   BookRequestStatus,
@@ -206,10 +211,21 @@ export class RequestVerificationService implements OnModuleInit {
     const folderId = join?.folderId ?? request.targetFolderId ?? (await this.resolveFolder(request.targetLibraryId));
     if (folderId === null) return { ok: false, reason: 'the destination library has no folder to file the book into' };
 
+    let targetFileName: string | undefined;
+    if (request.targetBookId != null && request.targetBookId === request.matchedBookId) {
+      const dockFile = await this.dockRepo.findById(fileId);
+      if (!dockFile) return { ok: false, reason: 'the replacement file is no longer in Book Dock' };
+      // Keep both editions on the server. A distinct name also prevents a same-title/year
+      // import from colliding with the old copy before the Kobo can switch to the new one.
+      const title = request.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 160);
+      targetFileName = `${title} (${request.language ?? 'edition'}, replacement ${request.id}-${fileId})${extname(dockFile.fileName)}`;
+    }
     const result = await this.finalizeService.finalizeManagedFile(fileId, {
       libraryId: join?.libraryId ?? request.targetLibraryId ?? undefined,
       folderId,
       ...(join ? { joinBook: join.joinBook } : {}),
+      ...(targetFileName ? { targetFileName } : {}),
+      ...(request.seriesName ? { requestedSeries: { name: request.seriesName, index: request.seriesIndex } } : {}),
     });
     if (!result.success) return { ok: false, reason: result.message ?? 'the Book Dock could not file this book' };
     if (join) {
@@ -519,7 +535,7 @@ export class RequestVerificationService implements OnModuleInit {
  * gained a "Book 1 (Unabridged)" suffix, not that something somewhere came to 65.
  */
 export function verifyAgainstRequest(
-  request: Pick<BookRequestRow, 'title' | 'subtitle' | 'authors' | 'isbn13'>,
+  request: Pick<BookRequestRow, 'title' | 'subtitle' | 'authors' | 'isbn13'> & { language?: string | null; mediaKind?: string },
   fetched: BookDockMetadata | null,
   embedded: BookDockMetadata | null,
   threshold: number = DEFAULT_VERIFICATION_THRESHOLD,
@@ -555,6 +571,20 @@ export function verifyAgainstRequest(
     // read as a blank value rather than as a field neither side filled in.
     { field: 'isbn13', requested: requestedIsbn || null, imported: importedIsbn || null, verdict: isbnVerdict },
   ];
+
+  // Provider metadata describes a catalog edition, not necessarily these bytes. A matching
+  // ISBN must never conceal a known translation mismatch or a missing embedded language.
+  const requestedLanguage = toRequestLanguage(request.language);
+  const embeddedLanguage = toRequestLanguage(embedded?.language);
+  if (request.mediaKind !== 'audiobook' && requestedLanguage && requestedLanguage !== embeddedLanguage) {
+    return {
+      score: 0,
+      passed: false,
+      code: 'below_threshold',
+      rows: rows('unknown'),
+      reason: `requested language ${requestedLanguage}, but the downloaded file declares ${embeddedLanguage ?? 'no language'}; review the edition before importing`,
+    };
+  }
 
   if (requestedIsbn && importedIsbn && requestedIsbn === importedIsbn) {
     return { score: 100, passed: true, reason: 'ISBN13 matches the requested edition exactly', code: 'isbn_match', rows: rows('match') };

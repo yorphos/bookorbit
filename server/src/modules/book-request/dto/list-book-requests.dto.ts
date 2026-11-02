@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { BOOK_REQUEST_MEDIA_KINDS, BOOK_REQUEST_SORT_DIRECTIONS, BOOK_REQUEST_SORT_FIELDS, BOOK_REQUEST_STATUSES } from '@bookorbit/types';
 import type { BookRequestMediaKind, BookRequestSortDirection, BookRequestSortField, BookRequestStatus } from '@bookorbit/types';
 
@@ -20,6 +20,12 @@ export class ListBookRequestsDto {
   @IsOptional()
   @IsIn(BOOK_REQUEST_STATUSES)
   status?: BookRequestStatus;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @IsIn(BOOK_REQUEST_STATUSES, { each: true })
+  statuses?: BookRequestStatus[];
 
   @IsOptional()
   @IsIn(BOOK_REQUEST_MEDIA_KINDS)

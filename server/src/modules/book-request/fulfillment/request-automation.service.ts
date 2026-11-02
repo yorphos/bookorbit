@@ -214,6 +214,8 @@ export class RequestAutomationService implements OnModuleInit {
     const joined = await this.requests.findById(requestId);
     if (!joined) return;
     const request = joined.request;
+    // Replacement is an explicit file choice; scheduled automation must not race the picker.
+    if (request.targetBookId != null && request.targetBookId === request.matchedBookId) return;
     if (!isGrabbableBookRequestStatus(request.status as BookRequestStatus)) return;
     // A retired medium has nothing to search for; the request waits for a person to close it.
     if (!isBookRequestMediaKind(request.mediaKind)) return;

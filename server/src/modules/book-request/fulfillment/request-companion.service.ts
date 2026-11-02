@@ -56,7 +56,8 @@ export class RequestCompanionService {
     const placement = await this.requests.findBookPlacement(bookId);
     if (!placement || placement.status !== 'present' || placement.organizationMode !== 'book_per_folder') return null;
     if (!followsBook && placement.libraryId !== request.targetLibraryId) return null;
-    if ((await this.requests.findBookMediaKinds(bookId)).has(request.mediaKind as BookRequestMediaKind)) return null;
+    const replacement = followsBook && request.matchedBookId === bookId;
+    if (!replacement && (await this.requests.findBookMediaKinds(bookId)).has(request.mediaKind as BookRequestMediaKind)) return null;
 
     return {
       libraryId: placement.libraryId,

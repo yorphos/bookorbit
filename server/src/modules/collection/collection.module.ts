@@ -12,5 +12,6 @@ import { CollectionService } from './collection.service';
   imports: [BookModule, LibraryModule, AchievementModule, PodcastModule],
   controllers: [CollectionController],
   providers: [CollectionService, CollectionRepository],
+  exports: [CollectionService],
 })
 export class CollectionModule {}

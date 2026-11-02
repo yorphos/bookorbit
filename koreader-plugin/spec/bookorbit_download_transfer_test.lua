@@ -144,6 +144,7 @@ local completed = Transfer.run{
     end,
     is_current = function() return true end,
     perform = function(download_opts)
+        assertEqual(directories["/downloads/Books"], true, "a first download creates its author/title folder before fetching")
         assertEqual(download_opts.publish, "parent", "the child never publishes a book file")
         assertEqual(download_opts.hash, "partial_md5", "the child hashes what it wrote")
         assertEqual(download_opts.block_timeout, 30, "the block timeout is the stall detector")

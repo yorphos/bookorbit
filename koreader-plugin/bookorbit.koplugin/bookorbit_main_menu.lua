@@ -293,7 +293,7 @@ local function closeKOReaderMenu(ui)
     end
 end
 
--- The menu bar icon: BookOrbit in the file browser, This book in a book, and
+-- The menu bar icon: BookOrbit in the file browser, Return to BookOrbit in a book, and
 -- sign-in for either when signed out. Opened after the menu's own close has
 -- been painted, so a sheet's backdrop is the page, not the menu.
 function MainMenu:onMenuBarIcon()
@@ -302,7 +302,7 @@ function MainMenu:onMenuBarIcon()
         if not self:isLoggedIn() then
             self:openSignIn(function() self:onMenuBarIconAfterSignIn() end)
         elseif self.ui and self.ui.document then
-            self:openBookSheet()
+            self:onReturnToBookOrbit()
         else
             self:browseCatalog(false)
         end
@@ -311,7 +311,7 @@ end
 
 function MainMenu:onMenuBarIconAfterSignIn()
     if self.ui and self.ui.document then
-        self:openBookSheet()
+        self:onReturnToBookOrbit()
     else
         self:browseCatalog(false)
     end
@@ -322,12 +322,21 @@ function MainMenu:addToMainMenu(menu_items)
         {
             -- The id predates the rename; scripts and patches look it up.
             id = "open_dashboard",
-            text = _("Open BookOrbit"),
+            text = self.ui and self.ui.document and _("Return to BookOrbit") or _("Open BookOrbit"),
             callback = function()
-                UIManager:tickAfterNext(function() self:openBookOrbit() end)
+                UIManager:tickAfterNext(function() if self.ui and self.ui.document then self:onReturnToBookOrbit() else self:openBookOrbit() end end)
             end,
         },
     }
+    table.insert(items, {
+        id = "book_requests",
+        text = _("Find and request books"),
+        callback = function()
+            UIManager:tickAfterNext(function()
+                self:openBookRequests()
+            end)
+        end,
+    })
     if self.ui and self.ui.document then
         table.insert(items, {
             id = "this_book",
@@ -365,6 +374,28 @@ function MainMenu:addToMainMenu(menu_items)
 end
 
 -- ----------------------------------------------------------------- openers
+function MainMenu:onBookOrbitDownloadComplete()
+    self.settings.catalog_dashboard_cache = nil
+    local catalog = self.catalog_browser
+    if catalog and catalog.markStackDirty then catalog:markStackDirty() end
+    if self.download_sync_timer then UIManager:unschedule(self.download_sync_timer) end
+    self.download_sync_timer = function()
+        self.download_sync_timer = nil
+        if not self:isLoggedIn() then return end
+        self:requestSweep(false, "download", { quiet = true })
+        local current = self.catalog_browser
+        if current and not current.catalog_closed and current:dashboardMode() then
+            current:loadDashboardRoot(true, { invisible = true })
+        end
+    end
+    UIManager:scheduleIn(1, self.download_sync_timer)
+end
+
+function MainMenu:openBookRequests()
+    local function open() require("bookorbit_hub").open(self, false, {kind = "discover"}) end
+    if self:isLoggedIn() then open() else self:openSignIn(open) end
+end
+
 function MainMenu:openBookOrbit()
     if not self:isLoggedIn() then
         self:openSignIn(function() self:browseCatalog(false) end)
@@ -405,6 +436,13 @@ function MainMenu:openBookTitle()
     if title and title ~= "" then return title end
     local file = ui.document.file or ""
     return (file:gsub(".*/", ""):gsub("%.[^%.]+$", ""))
+end
+
+function MainMenu:openReplacement(book_id, previous_book_id)
+    if not book_id or not previous_book_id then return end
+    self:browseCatalog(false)
+    local catalog = self.catalog_browser
+    if catalog then UIManager:nextTick(function() catalog:loadReplacement(book_id, previous_book_id) end) end
 end
 
 function MainMenu:openBookDetails(book_id)
@@ -448,6 +486,8 @@ function MainMenu:onMenuSheetAction(page, catalog, action)
             if catalog.listMode and catalog:listMode() then return catalog:listOpenSheet("sort") end
             catalog:showBookActions()
         end)
+    elseif kind == "requests" then
+        after(function() self:openBookRequests() end)
     elseif kind == "settings" then
         after(function() self:openSettings(catalog) end)
     elseif kind == "status" then
@@ -604,8 +644,9 @@ end
 function MainMenu:refreshActiveCatalogApi(refresh)
     local api = self:apiOpts(true)
     if not self.catalog_browser then return end
-    self.catalog_browser:setApi(api)
-    if refresh then self.catalog_browser:refreshCurrent() end
+    local browser = self.catalog_browser
+    browser:setApi(api)
+    if refresh and self.catalog_browser == browser then browser:refreshCurrent() end
 end
 
 function MainMenu:applyServerAddress(server_url)

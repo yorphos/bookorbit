@@ -51,7 +51,7 @@ local BookOrbitSidecar = require("bookorbit_sidecar")
 local BookOrbitSweep = require("bookorbit_sweep")
 local BookOrbitUpdater = require("bookorbit_updater")
 
-local PLUGIN_VERSION = "2.1.0"
+local PLUGIN_VERSION = "2.5.1"
 
 local SYNC_STRATEGY = {
     PROMPT = 1,
@@ -187,6 +187,11 @@ function BookOrbit:init()
     end
     if self.settings.catalog_auto_open == nil then
         self.settings.catalog_auto_open = "off"
+    end
+    if not self.settings.hub_startup_configured then
+        self.settings.catalog_auto_open = "home"
+        self.settings.hub_startup_configured = true
+        G_reader_settings:flush()
     end
     self.settings.ui_scale = require("bookorbit_board_metrics").setUserScale(self.settings.ui_scale)
 
@@ -946,9 +951,9 @@ function BookOrbit:onStart()
 end
 
 function BookOrbit:maybeAutoOpenCatalog(mode)
-    -- Home opens at startup like "filemanager"; a resumed book stays open and
-    -- closing it comes back to BookOrbit.
-    if mode == "home" then mode = "filemanager" end
+    -- Home is the launch surface even when KOReader resumes a document.
+    -- The reader stays underneath and keeps its reading position.
+    if mode == "home" then mode = "always" end
     if mode ~= "filemanager" and mode ~= "always" then return end
     if self.provision_applied then return end
     if not self:isLoggedIn() then return end
@@ -972,7 +977,14 @@ function BookOrbit:promptLogin()
     promptLogin()
 end
 
+function BookOrbit:onReturnToBookOrbit()
+    if not self:isLoggedIn() then self:openSignIn(); return true end
+    require("bookorbit_hub").open(self, true, {kind="home"})
+    return true
+end
+
 function BookOrbit:onDispatcherRegisterActions()
+    Dispatcher:registerAction("bookorbit_return", {category="none", event="ReturnToBookOrbit", title=_("Return to BookOrbit"), reader=true})
     Dispatcher:registerAction("bookorbit_sync_now",
         { category = "none", event = "BookOrbitSyncNow", title = _("BookOrbit: sync all books"), general = true })
     Dispatcher:registerAction("bookorbit_sync_book",
@@ -1204,6 +1216,10 @@ end
 -- Catalog browser
 
 function BookOrbit:openCatalogBrowser(prefer_cached_dashboard)
+    return require("bookorbit_hub").open(self, prefer_cached_dashboard)
+end
+
+function BookOrbit:openClassicCatalogBrowser(prefer_cached_dashboard)
     if self.catalog_browser ~= nil then return end
     self.catalog_browser = BookOrbitCatalog:new{
         title = _("BookOrbit"),

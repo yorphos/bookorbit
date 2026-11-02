@@ -62,3 +62,25 @@ assertEqual(pdf[1].label, "PDF", "a PDF is labelled by its format")
 assertEqual(pdf[1].sub, "Fixed pages, 2 KB", "and what that means")
 
 print("bookorbit_download_sheet_test.lua: ok")
+
+-- A swap explicitly targets the current path, even if the server's newer edition has a different name.
+local selected_path, error_text
+package.loaded["bookorbit_dialog_ui"].open = function(spec) spec.refresh = function() end; return spec end
+package.loaded["bookorbit_download_transfer"] = { isInsideRoot = function(root, path) return path:sub(1, #root + 1) == root .. "/" end }
+package.loaded["bookorbit_toast"] = { error = function(message) error_text = message end }
+local newer = { id = 20, format = "epub", filename = "Book (en, replacement 12).epub", sizeBytes = 1024 }
+local catalog = {
+    getCurrentDownloadDir = function() return "/books" end,
+    supportedFiles = function() return { newer } end,
+    downloadFile = function(_, path) selected_path = path end,
+}
+local page = DownloadSheet.open(catalog, { title = "Book" }, { file = newer, replace_path = "/books/Old name.epub" })
+assert(page.editions[1].sub:find(newer.filename, 1, true), "Show filenames to distinguish editions")
+page.on_action(page, {kind = "start"})
+assertEqual(selected_path, "/books/Old name.epub", "Swap only after downloading to the existing path")
+selected_path = nil
+page = DownloadSheet.open(catalog, { title = "Book" }, { file = newer, replace_path = "/books/Old name.pdf" })
+page.on_action(page, {kind = "start"})
+assert(selected_path == nil and error_text, "Do not write EPUB content with a PDF extension")
+assert(DownloadSheet.open(catalog, {}, {replace_path = "/outside/book.epub"}) == nil, "Do not replace files outside the authorized root")
+print("bookorbit_download_sheet replacement routing: ok")

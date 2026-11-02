@@ -195,3 +195,26 @@ assertEqual(state.tiles, "outline", "the reset restores the outline tiles")
 assertEqual(catalog.refreshes, 1, "the reset refreshes the open board")
 
 print("bookorbit_dashboard_board_menu_test.lua: ok")
+
+-- Successful downloads coalesce into one quiet sync and refresh the visible Home.
+local timers, syncs, refreshes = {}, 0, 0
+local ui = package.loaded["ui/uimanager"]
+ui.scheduleIn = function(_, _, fn) timers[fn] = true end
+ui.unschedule = function(_, fn) timers[fn] = nil end
+local plugin = {
+    settings = { catalog_dashboard_cache = { stale = true } },
+    isLoggedIn = function() return true end,
+    requestSweep = function(_, interactive, source, opts)
+        assert(not interactive and source == "download" and opts.quiet)
+        syncs = syncs + 1
+    end,
+    catalog_browser = { markStackDirty = function() end, dashboardMode = function() return true end,
+        loadDashboardRoot = function(_, replace, opts) assert(replace and opts.invisible); refreshes = refreshes + 1 end },
+}
+MainMenu.onBookOrbitDownloadComplete(plugin)
+MainMenu.onBookOrbitDownloadComplete(plugin)
+assert(plugin.settings.catalog_dashboard_cache == nil)
+local n = 0
+for fn in pairs(timers) do n = n + 1; fn() end
+assert(n == 1 and syncs == 1 and refreshes == 1)
+print("Download completion: quiet sync and Home refresh passed")

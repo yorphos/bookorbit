@@ -115,6 +115,7 @@ export interface ListRequestsOptions {
   page: number;
   limit: number;
   status?: BookRequestStatus;
+  statuses?: BookRequestStatus[];
   mediaKind?: BookRequestMediaKind;
   /** Exact original requester. Unlike userId, this does not include subscribers. */
   requesterUserId?: number;
@@ -203,6 +204,7 @@ export class BookRequestRepository {
   private filterConditions(table: RequestTable, opts: ListRequestsOptions): SQL[] {
     const conditions: SQL[] = [];
     if (opts.status) conditions.push(eq(table.status, opts.status));
+    if (opts.statuses?.length) conditions.push(inArray(table.status, opts.statuses));
     if (opts.mediaKind) conditions.push(eq(table.mediaKind, opts.mediaKind));
     if (opts.requesterUserId !== undefined) conditions.push(eq(table.userId, opts.requesterUserId));
     if (opts.selfServe !== undefined) conditions.push(eq(table.selfServe, opts.selfServe));
@@ -213,6 +215,7 @@ export class BookRequestRepository {
     const direction = opts.sortDir === 'asc' ? asc : desc;
     const SORT_COLUMNS = {
       createdAt: bookRequests.createdAt,
+      updatedAt: bookRequests.updatedAt,
       title: bookRequests.title,
       mediaKind: bookRequests.mediaKind,
       requester: users.name,

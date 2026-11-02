@@ -209,6 +209,7 @@ function MenuSheet.body(d, w, o)
     if d.list then
         table.insert(rows, MenuUI.row(iw, { icon = "list-filter", label = _("Sort, filter and view"), sub = not o.side_rows and d.list or nil, sub_data = true, chevron = true, action = { kind = "list-options" } }))
     end
+    table.insert(rows, MenuUI.row(iw, { icon = "search", label = _("Find and request books"), chevron = true, action = { kind = "requests" } }))
     table.insert(rows, MenuUI.row(iw, { icon = "sliders-horizontal", label = _("Settings"), sub = not o.side_rows and _("Opening, sync, Home, downloads") or nil, chevron = true, action = { kind = "settings" } }))
     local status_summary
     if not d.signed_in then

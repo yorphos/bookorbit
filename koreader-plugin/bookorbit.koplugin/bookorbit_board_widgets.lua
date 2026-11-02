@@ -1052,6 +1052,7 @@ end
 
 -- --------------------------------------------------------------- shortcuts
 local LINKS = {
+    requests = { "search", function() return _("Book requests") end, function() return nil end, function() return "" end },
     library = { "book-copy", function() return _("Library") end, function(d) return d.counts.library end, function() return _("books") end },
     series = { "layers-2", function() return _("Series") end, function(d) return d.counts.series end, function() return _("series") end },
     authors = { "feather", function() return _("Authors") end, function(d) return d.counts.authors end, function() return _("authors") end },
@@ -1148,6 +1149,12 @@ W.link = function(ctx, w, hh, props)
                 return vstack({ w = w, h = hh, pad = pad }, items)
             end,
             function() return vstack({ w = w, h = hh, pad = pad }, { headEl(), flex(0), count() }) end,
+        })
+    end
+    if props.link == "requests" then
+        return vstack({ w = w, h = hh, pad = pad }, {
+            headEl(), flex(0),
+            text(_("Find books"), { s = 12, col = INK.g4, w = iw }),
         })
     end
     if props.link == "search" then

@@ -379,6 +379,28 @@ function CatalogDetail:loadBookDetail(book_id, opts)
     end)
 end
 
+-- A loose-file library gives each edition a different book ID. Keep the replacement
+-- relationship on the server so this also works after the reader has restarted.
+function CatalogDetail:loadReplacement(book_id, previous_book_id)
+    self:runConnected(function()
+        local detail, err = self:fetchDeliveryBook(book_id, nil, _("Opening replacement..."))
+        if not detail then self:showRetry(err, function() self:loadReplacement(book_id, previous_book_id) end); return end
+        local previous = detail
+        if previous_book_id ~= book_id then
+            previous = self:fetchDeliveryBook(previous_book_id, nil, _("Finding the current copy..."))
+        end
+        self:refreshOnDevice()
+        local path = previous and self:detailReadPath(previous)
+        self:cacheBookDetail(detail)
+        self:showBookDetail(detail)
+        local newest
+        for _i, file in ipairs(self:supportedFiles(detail)) do
+            if not self:onDeviceFilePath(file) and (not newest or file.id > newest.id) then newest = file end
+        end
+        return require("bookorbit_download_sheet").open(self, detail, { replace_path = path, file = newest })
+    end)
+end
+
 function CatalogDetail:supportedFiles(detail)
     local files = {}
     for _, file in ipairs(detail.files or {}) do
@@ -556,6 +578,9 @@ function CatalogDetail:detailMenuItems(d, detail)
         table.insert(items, { icon = "download", label = _("Download options"), action = { kind = "download-options" } })
     end
     table.insert(items, { icon = "refresh-cw", label = _("Refresh from BookOrbit"), action = { kind = "refresh" } })
+    if d.on_device and d.read_path and #d.usable > 0 then
+        table.insert(items, { icon = "download", label = _("Swap downloaded file"), action = { kind = "swap-file" } })
+    end
     if d.on_device then
         table.insert(items, { icon = "trash", label = _("Remove from device"), action = { kind = "remove" }, separator = true })
     end
@@ -708,6 +733,14 @@ function CatalogDetail:detailRun(action, region, hold)
         return self:showDetailHighlights(d)
     elseif kind == "get" then
         return self:downloadDefaultFile(detail, action.file)
+    elseif kind == "swap-file" then
+        context.detail_sheet = nil
+        self:updateItems(nil, true)
+        local newest
+        for _i, entry in ipairs(d.usable or {}) do
+            if not entry.on_device and (not newest or entry.file.id > newest.id) then newest = entry.file end
+        end
+        return require("bookorbit_download_sheet").open(self, detail, { replace_path = d.read_path, file = newest })
     elseif kind == "download-options" then
         context.detail_sheet = nil
         self:updateItems(nil, true)

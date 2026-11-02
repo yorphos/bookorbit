@@ -156,6 +156,7 @@ interface SubmitHalf {
   coverUrl: string | null;
   /** The book a missing format was requested from, already checked against the requester. */
   targetBook: BookPlacement | null;
+  replacement?: boolean;
 }
 
 interface PlanBase {
@@ -274,6 +275,45 @@ export class BookRequestService {
   }
 
   async submit(dto: CreateBookRequestDto, actor: RequestUser): Promise<BookRequestSubmitResult> {
+    return this.submitInternal(dto, actor);
+  }
+
+  // A new request preserves the completed request and its subscribers. Approval, dedupe,
+  // attribution and destination access still use the ordinary submission path.
+  async requestReplacement(id: number, language: string, user: RequestUser): Promise<BookRequestSubmitResult> {
+    const original = await this.requireVisible(id, user);
+    const request = original.request;
+    if (request.status !== 'available' || request.matchedBookId === null || request.mediaKind !== 'ebook') {
+      throw new BadRequestException('Only an available ebook can request another edition');
+    }
+    const normalized = toRequestLanguage(language);
+    if (!normalized || !REQUEST_LANGUAGE_CODES.includes(normalized)) throw new BadRequestException('Choose a supported language');
+    return this.submitInternal(
+      {
+        title: request.title,
+        subtitle: request.subtitle ?? undefined,
+        authors: request.authors ?? [],
+        mediaKind: 'ebook',
+        language: normalized,
+        preferredFormats: ['epub'],
+        providerKey: request.providerKey ?? undefined,
+        providerId: request.providerId ?? undefined,
+        coverUrl: request.coverUrl ?? undefined,
+        selfServe: false,
+        // An edition ISBN can name the very translation we are replacing. Match the work instead.
+      },
+      user,
+      request.matchedBookId,
+    );
+  }
+
+  async requestBookReplacement(bookId: number, dto: CreateBookRequestDto, actor: RequestUser): Promise<BookRequestSubmitResult> {
+    const language = toRequestLanguage(dto.language);
+    if (!language || !REQUEST_LANGUAGE_CODES.includes(language)) throw new BadRequestException('Choose a supported language');
+    return this.submitInternal({ ...dto, mediaKind: 'ebook', language, preferredFormats: ['epub'], selfServe: false }, actor, bookId);
+  }
+
+  private async submitInternal(dto: CreateBookRequestDto, actor: RequestUser, replacementBookId?: number): Promise<BookRequestSubmitResult> {
     // Who this request is *for*, which is the caller unless an integration named somebody else.
     // Everything below asks about the subject and never about the actor: their permissions, their
     // libraries, their cap, their notifications. The actor stays the actor in the audit log.
@@ -286,7 +326,13 @@ export class BookRequestService {
       targetFolderId: dto.targetFolderId ?? null,
       preferredFormats: dto.preferredFormats ?? [],
       coverUrl: dto.coverUrl ?? null,
-      targetBook: dto.targetBookId === undefined ? null : await this.resolveTargetBook(dto.targetBookId, dto.mediaKind, subject),
+      targetBook:
+        replacementBookId !== undefined
+          ? await this.resolveTargetBook(replacementBookId, dto.mediaKind, subject, true)
+          : dto.targetBookId === undefined
+            ? null
+            : await this.resolveTargetBook(dto.targetBookId, dto.mediaKind, subject),
+      replacement: replacementBookId !== undefined,
     };
 
     const plan = await this.planSubmission(dto, half, subject, actor, selfServe);
@@ -310,6 +356,9 @@ export class BookRequestService {
           if (lastAttempt) throw error;
           continue;
         }
+        if (half.replacement && toRequestLanguage(winner.language) !== toRequestLanguage(dto.language)) {
+          throw new BadRequestException('An active request already exists for a different language; review that request first');
+        }
         try {
           return await this.joinPlanned(
             { kind: 'join', existing: winner, work: plan.work, selfServe: plan.selfServe, joinsBook: plan.joinsBook },
@@ -323,7 +372,7 @@ export class BookRequestService {
       }
     }
 
-    this.afterCreate(row, plan);
+    this.afterCreate(row, plan, replacementBookId !== undefined);
     this.gateway.emitChanged();
 
     if (!plan.settledOnCreate) {
@@ -451,12 +500,17 @@ export class BookRequestService {
    * The book a missing format was asked for from, checked the way any other reference to a book is:
    * it has to be somewhere the requester can reach, and it has to actually be missing that format.
    */
-  private async resolveTargetBook(bookId: number, mediaKind: BookRequestMediaKind, subject: RequestUser): Promise<BookPlacement> {
+  private async resolveTargetBook(
+    bookId: number,
+    mediaKind: BookRequestMediaKind,
+    subject: RequestUser,
+    replacement = false,
+  ): Promise<BookPlacement> {
     const [placement, reachable] = await Promise.all([this.repo.findBookPlacement(bookId), this.reachableLibraryIds(subject)]);
     if (!placement || placement.status !== 'present' || (reachable !== null && !reachable.includes(placement.libraryId))) {
       throw submitRefusal('SUBMIT_TARGET_BOOK_NOT_FOUND', 'That book is not in a library you can reach');
     }
-    if ((await this.repo.findBookMediaKinds(bookId)).has(mediaKind)) {
+    if (!replacement && (await this.repo.findBookMediaKinds(bookId)).has(mediaKind)) {
       throw submitRefusal('SUBMIT_TARGET_BOOK_HAS_MEDIUM', `That book already has a ${mediaKind}`, { mediaKind });
     }
     return placement;
@@ -490,16 +544,21 @@ export class BookRequestService {
     // A book that can hold another format pins where this one lands: next to the format it has.
     // A loose-file library cannot hold two formats as one book, so there the request lands the way
     // any other does and becomes a book of its own.
-    const joinsBook = half.targetBook !== null && half.targetBook.organizationMode === 'book_per_folder' ? half.targetBook : null;
+    const joinsBook =
+      half.targetBook !== null && (half.replacement || half.targetBook.organizationMode === 'book_per_folder') ? half.targetBook : null;
 
     // Fold into an existing live request rather than opening a second one. A second grab of the
     // same torrent is exactly what the dedupe claim exists to prevent, so even a self-server is
     // folded - but folded as the person who is going to fulfil it, not as a bystander.
     const existing = await this.dedupe.findActiveRequestFor(work);
+    if (existing && half.replacement && toRequestLanguage(existing.language) !== toRequestLanguage(dto.language)) {
+      throw new BadRequestException('An active request already exists for a different language; review that request first');
+    }
     if (existing) return { kind: 'join', existing, selfServe, work, joinsBook };
 
     const maySeeRequestedBooks = subject.contentFilters.exemptRequestsFromUserId === subject.id;
-    const existingBookId = maySeeRequestedBooks ? await this.dedupe.findOwnedBookFor(work, await this.reachableLibraryIds(subject)) : null;
+    const existingBookId =
+      maySeeRequestedBooks && !half.replacement ? await this.dedupe.findOwnedBookFor(work, await this.reachableLibraryIds(subject)) : null;
 
     let targetLibraryId: number | null = null;
     let targetFolderId: number | null = null;
@@ -577,7 +636,9 @@ export class BookRequestService {
       note: dto.note ?? null,
       targetLibraryId,
       targetFolderId,
-      matchedBookId: existingBookId,
+      // While acquiring a replacement, this is the copy being retained. The matching
+      // target/matched pair records explicit replacement intent without deleting either file.
+      matchedBookId: half.replacement ? (joinsBook?.bookId ?? null) : existingBookId,
       targetBookId: availableOnCreate ? null : (joinsBook?.bookId ?? null),
       dedupeKey: primaryDedupeKey(work),
       decidedByUserId: approvedOnCreate ? subject.id : null,
@@ -630,7 +691,7 @@ export class BookRequestService {
   }
 
   /** Everything a freshly inserted request sets in motion besides the announcement. */
-  private afterCreate(row: BookRequestRow, plan: CreatePlan): void {
+  private afterCreate(row: BookRequestRow, plan: CreatePlan, manualSelection = false): void {
     this.logger.log(
       `[book_request.create] [end] requestId=${row.id} userId=${row.userId} createdByUserId=${row.createdByUserId ?? '-'} mediaKind=${row.mediaKind} autoApproved=${plan.autoApproved} selfServe=${plan.selfServe} availableOnCreate=${plan.availableOnCreate} title="${sanitizeLogValue(row.title)}" - book request created`,
     );
@@ -642,7 +703,7 @@ export class BookRequestService {
     //
     // Never for a self-server, who is on their way to the picker right now. Automation would race
     // them onto a release they did not choose, which is the opposite of what they asked for.
-    if (!plan.availableOnCreate && plan.autoApproved && !plan.selfServe) this.automation.considerRequest(row.id, 'auto_approval');
+    if (!manualSelection && !plan.availableOnCreate && plan.autoApproved && !plan.selfServe) this.automation.considerRequest(row.id, 'auto_approval');
   }
 
   /**
@@ -838,6 +899,7 @@ export class BookRequestService {
       page: dto.page ?? 1,
       limit: dto.limit ?? 20,
       status: dto.status,
+      statuses: dto.statuses,
       mediaKind: dto.mediaKind,
       userId: user.id,
       selfServe: dto.selfServe,
@@ -855,6 +917,7 @@ export class BookRequestService {
       page: dto.page ?? 1,
       limit: dto.limit ?? 20,
       status: dto.status,
+      statuses: dto.statuses,
       mediaKind: dto.mediaKind,
       requesterUserId: dto.requesterUserId,
       selfServe: dto.selfServe,

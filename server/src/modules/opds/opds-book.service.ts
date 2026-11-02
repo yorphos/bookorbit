@@ -8,6 +8,8 @@ import * as schema from '../../db/schema';
 import {
   authors,
   bookAuthors,
+  bookGenres,
+  genres,
   bookFiles,
   bookMetadata,
   bookSeries,
@@ -35,6 +37,8 @@ type OpdsBookFilters = {
   collectionId?: number;
   smartScopeId?: number;
   author?: string;
+  genre?: string;
+  language?: string;
   series?: string;
   seriesId?: number;
   q?: string;
@@ -389,6 +393,15 @@ export class OpdsBookService {
       );
     }
 
+    if (filters?.genre) {
+      clauses.push(
+        sql`EXISTS (SELECT 1 FROM ${bookGenres} INNER JOIN ${genres} ON ${genres.id} = ${bookGenres.genreId} WHERE ${bookGenres.bookId} = ${books.id} AND lower(${genres.name}) = lower(${filters.genre}))`,
+      );
+    }
+    if (filters?.language) {
+      const aliases: Record<string, string> = { en: 'eng', fr: 'fra', es: 'spa', de: 'deu', it: 'ita', pt: 'por' };
+      clauses.push(sql`lower(${bookMetadata.language}) IN (${filters.language}, ${aliases[filters.language] ?? filters.language})`);
+    }
     const seriesFilter = this.resolveSeriesFilter(filters);
     if (seriesFilter) clauses.push(this.buildSeriesMembershipClause(seriesFilter));
 

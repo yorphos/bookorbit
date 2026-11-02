@@ -1,4 +1,20 @@
+import { KoreaderRouletteController } from './koreader-roulette.controller';
+import { KoreaderRouletteService } from './koreader-roulette.service';
+import { KoreaderRouletteRepository } from './koreader-roulette.repository';
+import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
+import { KoreaderHubService } from './koreader-hub.service';
+import { KoreaderHubController } from './koreader-hub.controller';
+import { CollectionModule } from '../collection/collection.module';
+import { UserPreferencesModule } from '../user-preferences/user-preferences.module';
+import { KoreaderDiscoveryController } from './koreader-discovery.controller';
+import { KoreaderDiscoveryService } from './koreader-discovery.service';
 import { Module } from '@nestjs/common';
+
+import { BookRequestModule } from '../book-request/book-request.module';
+import { MetadataFetchModule } from '../metadata-fetch/metadata-fetch.module';
+import { MetadataPreferencesModule } from '../metadata-preferences/metadata-preferences.module';
+import { KoreaderRequestsController } from './koreader-requests.controller';
+import { KoreaderRequestsService } from './koreader-requests.service';
 
 import { CommonModule } from '../../common/common.module';
 import { AchievementModule } from '../achievement/achievement.module';
@@ -40,6 +56,11 @@ import { KoreaderSyncEstimateCleanupService } from './koreader-sync-estimate-cle
 
 @Module({
   imports: [
+    CollectionModule,
+    UserPreferencesModule,
+    BookRequestModule,
+    MetadataFetchModule,
+    MetadataPreferencesModule,
     CommonModule,
     UserModule,
     UserBookNoteModule,
@@ -57,8 +78,23 @@ import { KoreaderSyncEstimateCleanupService } from './koreader-sync-estimate-cle
     ReadingSessionModule,
     RecommendationModule,
   ],
-  controllers: [KoreaderDeliveryController, KoreaderController, KoreaderPluginController, KoreaderCatalogController],
+  controllers: [
+    KoreaderRouletteController,
+    KoreaderHubController,
+    KoreaderDiscoveryController,
+    KoreaderRequestsController,
+    KoreaderDeliveryController,
+    KoreaderController,
+    KoreaderPluginController,
+    KoreaderCatalogController,
+  ],
   providers: [
+    KoreaderRouletteService,
+    KoreaderRouletteRepository,
+    KoreaderHubService,
+    KoreaderRequestsService,
+    KoreaderDiscoveryService,
+    KoreaderExternalCatalogService,
     KoreaderDeliveryService,
     KoreaderService,
     KoreaderHashLinkService,

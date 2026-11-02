@@ -266,3 +266,26 @@ assertEqual(#sheet, 3, "with a sheet open only its rows remain")
 assertEqual(sheet[1].id, "sheet-head", "starting at its close button")
 
 print("bookorbit_detail_focus_test.lua: ok")
+
+-- Replacements in a book-per-file library retain the old local path while loading the new book.
+local swap
+package.loaded["bookorbit_download_sheet"] = { open = function(_, detail, opts) swap = {detail = detail, opts = opts}; return swap end }
+local original = { id = 10, files = { {id = 100, format = "epub"} } }
+local replacement = { id = 20, files = { {id = 200, format = "epub", filename = "Replacement.epub"} } }
+local catalog = setmetatable({
+    runConnected = function(_, fn) fn() end,
+    fetchDeliveryBook = function(_, id) return id == 10 and original or replacement end,
+    refreshOnDevice = function() end,
+    onDeviceFilePath = function(_, file) return file.id == 100 and "/books/Original.epub" or nil end,
+    onDeviceBookPath = function() return nil end,
+    cacheBookDetail = function() end,
+    showBookDetail = function() end,
+}, {__index = CatalogDetail})
+catalog:loadReplacement(20, 10)
+assertEqual(swap.detail.id, 20, "Download the new library record")
+assertEqual(swap.opts.replace_path, "/books/Original.epub", "Retain the previous record's Kobo destination")
+assertEqual(swap.opts.file.id, 200, "Select the replacement file")
+catalog.onDeviceFilePath = function() return nil end
+catalog:loadReplacement(20, 10)
+assert(swap.opts.replace_path == nil, "A missing previous copy becomes a normal download")
+print("bookorbit detail cross-book replacement: ok")

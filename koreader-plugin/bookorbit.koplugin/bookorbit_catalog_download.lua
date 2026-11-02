@@ -303,6 +303,7 @@ function CatalogDownload.install(Catalog)
                     self:updateItems()
                 end
             end
+            if self._manager then self._manager:onBookOrbitDownloadComplete() end
             if ui then return ui.finished(true, nil, local_path, linked) end
             -- The page itself turns to Start reading; a short note is enough.
             if self.detailMode and self:detailMode() and not linked then

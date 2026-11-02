@@ -79,6 +79,11 @@ end
 -- Author portraits share the cache under their own prefix: an author id and
 -- a book id may be the same number.
 local function memoKey(book)
+    if book and type(book.hub_cover_key) == "string" and book.hub_cover_key:match("^[a-f0-9]+$")
+            and #book.hub_cover_key == 32 and type(book.hub_cover_path) == "string"
+            and book.hub_cover_path:match("^/koreader/plugin/") then
+        return "h" .. book.hub_cover_key
+    end
     local id = normalizedBookId(book)
     if not id then return nil end
     return (book.author_photo and "a" or "") .. id .. "_" .. coverToken(book)
@@ -185,7 +190,7 @@ end
 -- Path, existence and display state for one cover, memoized per book id and
 -- cover token so a repaint costs a table lookup instead of a filesystem probe.
 function CatalogThumbnails:thumbnailEntry(book)
-    if not book or book.id == nil or not book.hasCover then return nil end
+    if not book or (book.id == nil and not book.hub_cover_key) or not book.hasCover then return nil end
     local key = memoKey(book)
     if not key then return nil end
     local entry = self.thumbnail_memo[key]
@@ -379,7 +384,7 @@ function CatalogThumbnails:downloadThumbnailBatch(batch, generation)
                 temp = self.thumbnail_temp_dir .. "/"
                     .. self.thumbnail_cache_session_id .. "_" .. generation .. "_" .. key .. ".part"
             end
-            jobs[#jobs + 1] = { id = book.id, key = key, path = path, temp = temp, author_photo = book.author_photo == true }
+            jobs[#jobs + 1] = { id = book.id, key = key, path = path, temp = temp, author_photo = book.author_photo == true, cover_path = book.hub_cover_path }
         end
     end
     if #jobs == 0 then return {} end
@@ -388,11 +393,13 @@ function CatalogThumbnails:downloadThumbnailBatch(batch, generation)
     local completed, result = client:runInSubprocess(function()
         local outcome = {}
         for _, job in ipairs(jobs) do
-            local download = job.author_photo and client.downloadCatalogAuthorPhoto or client.downloadCatalogThumbnail
-            local ok, err = download(client, job.id, job.path, {
+            local download = job.cover_path and client.downloadBlocking or (job.author_photo and client.downloadCatalogAuthorPhoto or client.downloadCatalogThumbnail)
+            local ok, err = download(client, job.cover_path or job.id, job.path, {
                 temp_path = job.temp,
                 max_bytes = THUMBNAIL_MAX_BYTES,
                 background = false,
+                accept = "image/jpeg,image/*",
+                expect_content_type = "image/",
             })
             if not ok then
                 logger.dbg("BookOrbit: thumbnail download failed", job.id, err)

@@ -490,6 +490,7 @@ function CatalogBulkDownload.install(Catalog)
             books = books,
             known_skips = self:bulkCountKnownSkips(books),
             clear_selection = opts and opts.clear_selection == true,
+            preserve_order = opts and opts.preserve_order == true,
         })
     end
 
@@ -511,7 +512,7 @@ function CatalogBulkDownload.install(Catalog)
     function Catalog:bulkSourceKey(source)
         local prefix = source.account_key and (source.account_key .. "|" .. tostring(source.variant) .. "|") or ""
         if source.kind == "ids" then
-            return prefix .. "ids|" .. idListKey(source.ids)
+            return prefix .. (source.preserve_order and ("ordered|" .. table.concat(source.ids, ",")) or ("ids|" .. idListKey(source.ids)))
         end
         return prefix .. "filter|" .. sortedParamKey(source.params or {})
     end
@@ -543,7 +544,7 @@ function CatalogBulkDownload.install(Catalog)
             page_position = 0,
             position = { page = 1, chunk = 1 },
             next_position = nil,
-            id_chunks = source.kind == "ids" and chunkIds(source.ids, ID_CHUNK_SIZE) or nil,
+            id_chunks = source.kind == "ids" and chunkIds(source.ids, source.preserve_order and 1 or ID_CHUNK_SIZE) or nil,
             has_next = true,
             pages_loaded = 0,
             index = 0,
@@ -1357,6 +1358,7 @@ function CatalogBulkDownload.install(Catalog)
             self:updateItems()
         end
 
+        if (ctx.counts.downloaded or 0) > 0 and self._manager then self._manager:onBookOrbitDownloadComplete() end
         local summary = self:bulkSummary(ctx)
         summary.on_retry = function() self:confirmBulkBooks(ctx.failed_books, _("Failed downloads")) end
         local sheet = ctx.progress_sheet

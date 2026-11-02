@@ -154,3 +154,11 @@ describe('RequestCompanionService.handOn', () => {
     expect(repo.findById).not.toHaveBeenCalled();
   });
 });
+
+it('joins another edition of the same medium only for an explicit replacement', async () => {
+  const { service } = makeService({ findBookMediaKinds: vi.fn().mockResolvedValue(new Set(['ebook'])) });
+  expect(await service.resolveJoin(request({ targetBookId: 42, matchedBookId: 42, mediaKind: 'ebook' }))).toEqual(
+    expect.objectContaining({ joinBook: expect.objectContaining({ bookId: 42 }) }),
+  );
+  expect(await service.resolveJoin(request({ targetBookId: 42, matchedBookId: null, mediaKind: 'ebook' }))).toBeNull();
+});

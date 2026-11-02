@@ -1144,7 +1144,7 @@ describe('KoreaderCatalogService', () => {
       { id: 10, title: 'Dune', seriesIndex: '1', readStatus: null },
       { id: 11, title: 'Dune Messiah', seriesIndex: '2', readStatus: 'read' },
     ]);
-    expect(detail.files[0]).toEqual(expect.objectContaining({ sourceSizeBytes: 1234 }));
+    expect(detail.files[0]).toEqual(expect.objectContaining({ sourceSizeBytes: 1234, filename: expect.any(String) }));
     expect(recommendationService.getSeriesBooks).toHaveBeenCalledWith(10, expect.objectContaining({ id: 7 }));
     expect(recommendationService.getAuthorBooks).toHaveBeenCalledWith(10, expect.objectContaining({ id: 7 }));
     expect(recommendationService.getRecommendations).toHaveBeenCalledWith(10, expect.objectContaining({ id: 7 }));

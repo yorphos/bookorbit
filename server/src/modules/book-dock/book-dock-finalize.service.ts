@@ -1053,7 +1053,13 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
    */
   async finalizeManagedFile(
     fileId: number,
-    override: { libraryId?: number; folderId?: number; joinBook?: JoinBook },
+    override: {
+      libraryId?: number;
+      folderId?: number;
+      joinBook?: JoinBook;
+      targetFileName?: string;
+      requestedSeries?: { name: string; index: number | null };
+    },
   ): Promise<BookDockFinalizeFileResult> {
     const row = await this.repo.findById(fileId);
     if (!row) {
@@ -1064,10 +1070,27 @@ export class BookDockFinalizeService implements OnModuleInit, OnApplicationBoots
       mergeBookDockMetadata(row.embeddedMetadata, row.fetchedMetadata, row.selectedMetadata),
       row.selectedMetadata,
     );
-    const rowForFinalize = merged ? { ...row, selectedMetadata: merged } : row;
+    // Requested series fills missing facts only; embedded or reviewed metadata wins.
+    const selected = { ...merged };
+    if (!selected.seriesName && override.requestedSeries) {
+      selected.seriesName = override.requestedSeries.name;
+      selected.seriesIndex = override.requestedSeries.index == null ? null : String(override.requestedSeries.index);
+    } else if (selected.seriesName === override.requestedSeries?.name && selected.seriesIndex == null && override.requestedSeries?.index != null) {
+      selected.seriesIndex = String(override.requestedSeries.index);
+    }
+    const rowForFinalize = { ...row, selectedMetadata: selected };
 
     const overrideMap = new Map<number, FinalizeOverrideEntry>([
-      [fileId, { libraryId: override.libraryId, folderId: override.folderId, joinBook: override.joinBook, lookedUpCoverUrl }],
+      [
+        fileId,
+        {
+          libraryId: override.libraryId,
+          folderId: override.folderId,
+          joinBook: override.joinBook,
+          targetFileName: override.targetFileName,
+          lookedUpCoverUrl,
+        },
+      ],
     ]);
 
     const result = await this.finalizeFile(rowForFinalize, undefined, undefined, overrideMap, 0, true);

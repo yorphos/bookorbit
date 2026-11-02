@@ -95,6 +95,18 @@ function collectValues(value: unknown, seen = new WeakSet<object>()): unknown[] 
 }
 
 describe('OpdsBookService', () => {
+  it('applies genre and language inside the same permission-scoped catalog query', async () => {
+    const { service } = makeService([]);
+    vi.spyOn(service, 'getAccessibleLibraryIds').mockResolvedValue([19]);
+    const page = vi.spyOn(testable(service), 'paginatedBookQuery').mockResolvedValue({ entries: [], total: 0 });
+    await service.getBooksPage(7, 'title', 2, 20, { genre: 'Science Fiction', language: 'en' });
+    const rendered = new PgDialect().sqlToQuery(page.mock.calls[0][0] as SQL);
+    expect(rendered.sql).toContain('book_genres');
+    expect(rendered.sql).toContain('language');
+    expect(rendered.sql).toContain('library_id');
+    expect(rendered.params).toEqual(expect.arrayContaining([19, 'Science Fiction', 'en', 'eng']));
+  });
+
   it('returns accessible library ids for superusers and regular users', async () => {
     const superDb = makeDb([[{ id: 1 }, { id: 4 }]]);
     const superService = new OpdsBookService(superDb as never, {} as never, new OpdsCollectionRepository(superDb as never));

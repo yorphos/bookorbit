@@ -124,6 +124,15 @@ function Transfer.run(opts)
     if not Transfer.isInsideRoot(root, opts.destination) then
         return nil, "unsafe_destination"
     end
+    -- The download sheet previews the server's layout without creating it.
+    -- Ensure a new author/title directory exists before fetching any bytes.
+    local parent = opts.destination:match("^(.*)/[^/]+$")
+    if parent == "" then parent = "/" end
+    if parent and lfs.attributes(parent, "mode") ~= "directory" then
+        util.makePath(parent)
+        if lfs.attributes(parent, "mode") ~= "directory" then return nil, "publish_failed" end
+    end
+    if not Transfer.isInsideRoot(root, opts.destination) then return nil, "unsafe_destination" end
     local dir = Transfer.ensureTempDir(root)
     if not dir then return nil, "temp_dir_failed" end
 

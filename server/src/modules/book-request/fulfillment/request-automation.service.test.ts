@@ -136,6 +136,15 @@ async function settle(): Promise<void> {
 }
 
 describe('RequestAutomationService.considerRequest', () => {
+  it('never searches or grabs a replacement without a manual release choice', async () => {
+    const { service, fulfillment, releases } = makeService({ request: { targetBookId: 42, matchedBookId: 42 } });
+    service.considerRequest(7);
+    await settle();
+    expect(releases.search).not.toHaveBeenCalled();
+    expect(fulfillment.grab).not.toHaveBeenCalled();
+    expect(fulfillment.setRequestStatus).not.toHaveBeenCalled();
+  });
+
   it('does nothing at all while unattended grabbing is off', async () => {
     const { service, fulfillment, releases, notifier } = makeService({ settings: { autoGrabEnabled: false } });
 
