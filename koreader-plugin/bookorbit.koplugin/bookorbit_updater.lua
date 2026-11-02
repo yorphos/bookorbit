@@ -25,19 +25,23 @@ local Toast = setmetatable({}, { __index = function(_t, key) return require("boo
 local BookOrbitUpdater = {}
 
 -- Returns true if `candidate` is strictly newer than `current` (semver, optional "v" prefix).
+-- Versions are the upstream plugin version, plus "+yrp.N" on builds of the yorphos fork.
+-- N orders builds of the same upstream version; a plain upstream version counts as N = 0.
 function BookOrbitUpdater.isNewer(candidate, current)
     local function parse(v)
         if type(v) ~= "string" then return nil end
         local a, b, c = v:match("^v?(%d+)%.(%d+)%.(%d+)")
         if not a then return nil end
-        return { tonumber(a), tonumber(b), tonumber(c) }
+        local fork = v:match("[+-]yrp%.(%d+)$")
+        return { tonumber(a), tonumber(b), tonumber(c), tonumber(fork) or 0 }
     end
     local c = parse(candidate)
     local cur = parse(current)
     if not c or not cur then return false end
-    if c[1] ~= cur[1] then return c[1] > cur[1] end
-    if c[2] ~= cur[2] then return c[2] > cur[2] end
-    return c[3] > cur[3]
+    for i = 1, 4 do
+        if c[i] ~= cur[i] then return c[i] > cur[i] end
+    end
+    return false
 end
 
 -- Wraps a path in POSIX single quotes, escaping any embedded single quotes.

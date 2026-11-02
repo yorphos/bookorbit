@@ -541,7 +541,10 @@ export class RequestVerificationService implements OnModuleInit {
  * gained a "Book 1 (Unabridged)" suffix, not that something somewhere came to 65.
  */
 export function verifyAgainstRequest(
-  request: Pick<BookRequestRow, 'title' | 'subtitle' | 'authors' | 'seriesName' | 'seriesIndex' | 'isbn13'> & { language?: string | null; mediaKind?: string },
+  request: Pick<BookRequestRow, 'title' | 'subtitle' | 'authors' | 'seriesName' | 'seriesIndex' | 'isbn13'> & {
+    language?: string | null;
+    mediaKind?: string;
+  },
   fetched: BookDockMetadata | null,
   embedded: BookDockMetadata | null,
   threshold: number = DEFAULT_VERIFICATION_THRESHOLD,

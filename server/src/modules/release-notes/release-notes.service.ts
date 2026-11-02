@@ -247,8 +247,9 @@ export class ReleaseNotesService {
   }
 
   private parseSemver(version: string): [number, number, number] | null {
-    const parts = version.split('.').map(Number);
-    if (parts.length < 3 || parts.some((p) => isNaN(p))) return null;
-    return [parts[0], parts[1], parts[2]];
+    // Fork builds carry a suffix (v3.6.0-yrp.1); only the upstream release part is compared.
+    const match = version.match(/^(\d+)\.(\d+)\.(\d+)/);
+    if (!match) return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
   }
 }

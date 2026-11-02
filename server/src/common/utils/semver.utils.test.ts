@@ -9,6 +9,10 @@ describe('isSemverNewer', () => {
     ['2.0.0', '1.99.99'],
     ['v1.2.3', '1.2.2'],
     ['1.2.3-beta.1', '1.2.2'],
+    ['2.2.0+yrp.2', '2.2.0+yrp.1'],
+    ['2.2.0+yrp.1', '2.2.0'],
+    ['2.3.0', '2.2.0+yrp.9'],
+    ['v3.6.0-yrp.2', 'v3.6.0-yrp.1'],
   ])('returns true when %s is newer than %s', (candidate, current) => {
     expect(isSemverNewer(candidate, current)).toBe(true);
   });
@@ -18,6 +22,9 @@ describe('isSemverNewer', () => {
     ['1.0.0', '1.0.1'],
     ['1.1.0', '2.0.0'],
     ['v1.2.3', '1.2.3'],
+    ['2.2.0+yrp.1', '2.2.0+yrp.1'],
+    ['2.2.0+yrp.9', '2.3.0'],
+    ['2.2.0+yrp.1', '2.5.2'],
   ])('returns false when %s is not newer than %s', (candidate, current) => {
     expect(isSemverNewer(candidate, current)).toBe(false);
   });

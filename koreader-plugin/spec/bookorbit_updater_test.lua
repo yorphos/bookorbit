@@ -204,6 +204,11 @@ do -- semver comparison
     assertEqual(BookOrbitUpdater.isNewer("1.3.1", "1.4.0"), false, "an older version is not newer")
     assertEqual(BookOrbitUpdater.isNewer("1.10.0", "1.9.0"), true, "minor versions compare numerically")
     assertEqual(BookOrbitUpdater.isNewer(nil, "1.4.0"), false, "a missing candidate is not newer")
+    assertEqual(BookOrbitUpdater.isNewer("2.2.0+yrp.2", "2.2.0+yrp.1"), true, "a later fork build is newer")
+    assertEqual(BookOrbitUpdater.isNewer("2.2.0+yrp.1", "2.2.0"), true, "a fork build is newer than its upstream base")
+    assertEqual(BookOrbitUpdater.isNewer("2.2.0+yrp.1", "2.2.0+yrp.1"), false, "the same fork build is not newer")
+    assertEqual(BookOrbitUpdater.isNewer("2.3.0+yrp.1", "2.2.0+yrp.9"), true, "a newer upstream base wins over the fork number")
+    assertEqual(BookOrbitUpdater.isNewer("2.2.0+yrp.9", "2.3.0"), false, "a fork number never outranks a newer upstream")
 end
 
 do -- the Archiver path strips the zip's single root directory
