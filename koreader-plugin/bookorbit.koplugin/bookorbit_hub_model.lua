@@ -303,9 +303,9 @@ M.OPTIONS = {
         key = "hub_flash_every",
         label = "Full refresh to clear ghosting",
         values = {
-            { 8, "Every 8 screens" },
+            { "screen", "On every screen change" },
             { 4, "Every 4 screens" },
-            { 16, "Every 16 screens" },
+            { 8, "Every 8 screens" },
             { 0, "Never, and no flash when a message closes" },
         },
     },

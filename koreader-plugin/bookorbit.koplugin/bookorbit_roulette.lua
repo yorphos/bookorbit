@@ -185,6 +185,7 @@ function R.decide(hub, decision, book)
     elseif hub.route.kind == "matches" then
         hub:load()
     else
+        hub.bigChange = true
         hub:refreshView()
         R.refill(hub)
     end
@@ -200,6 +201,7 @@ function R.undo(hub, id)
             unmark(hub, queued.card)
         end
         G_reader_settings:flush()
+        hub.bigChange = true
         hub:refreshView()
         Toast.show("Decision undone.")
         return

@@ -133,13 +133,21 @@ function Hub:refreshView(mode, region)
         self.route.scroll = self.state.scrolling:getScrolledOffset()
     end
     if not region and not mode then
-        -- E-ink ghosting builds up over partial refreshes, whatever changed the
-        -- screen: clear it with a full refresh every few screens.
-        self.screens = (self.screens or 0) + 1
-        local every = tonumber(Model.setting(self.plugin.settings, "hub_flash_every")) or 8
-        if every > 0 and self.screens % every == 0 then
-            self.flashNext = true
+        -- A partial e-ink refresh leaves a ghost of what was there before. A new
+        -- screen (navigation, tab, Back, page turn, the next Roulette card) gets a
+        -- full flash; updates within a screen stay partial so they do not blink.
+        local new_screen = self.bigChange
+            or self.route ~= self.paintedRoute
+            or self.route.subpage ~= self.paintedSubpage
+        local policy = Model.setting(self.plugin.settings, "hub_flash_every")
+        if new_screen then
+            self.screens = (self.screens or 0) + 1
+            local every = tonumber(policy)
+            if policy == "screen" or (every and every > 0 and self.screens % every == 0) then
+                self.flashNext = true
+            end
         end
+        self.paintedRoute, self.paintedSubpage, self.bigChange = self.route, self.route.subpage, false
     end
     if self.flashNext and not region then
         mode, self.flashNext = "full", false

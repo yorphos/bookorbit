@@ -275,6 +275,22 @@ assert(full == 1 and #regions == 2 and regions[2] and regions[2].h < 100, "An un
 assert(not hub.state.cached, "The saved copy counts as current after a 304")
 etags[books_path] = nil
 hub.page.refresh = refresh_before
+-- A new screen gets a full flash to clear the previous one; updates in place do not.
+local modes = {}
+hub.page.refresh = function(page, mode, region) modes[#modes + 1] = { mode = mode, region = region }; return refresh_before(page, mode, region) end
+hub:navigate({kind = "home"})
+assert(modes[1].mode == "full" and not modes[1].region, "Opening another screen flashes once")
+local after_nav = #modes
+hub:refreshView()
+assert(#modes == after_nav + 1 and modes[#modes].mode ~= "full", "Redrawing the same screen does not flash")
+local before_tab = #modes
+hub:action({kind = "tab", tab = "books"})
+assert(modes[before_tab + 1].mode == "full", "Switching tabs flashes")
+local before_turn = #modes
+hub.state.next = true; hub.state.sliceSize = 1; hub.state.body.items = {{title = "a"}, {title = "b"}}
+hub:turnPage(1)
+assert(modes[before_turn + 1] and modes[before_turn + 1].mode == "full", "Turning a page flashes")
+hub.page.refresh = refresh_before
 -- Stats, Friends, Hub options and Diagnostics render within the screen.
 hub:action({kind = "stats"}); paint()
 assert(hub.route.kind == "stats" and hub.state.body.minutes.week == 140, "Stats load from the hub endpoint")
