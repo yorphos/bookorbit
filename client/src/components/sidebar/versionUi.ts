@@ -9,9 +9,15 @@ export type SidebarVersionUi = {
 
 const GITHUB_RELEASES_BASE = 'https://github.com/bookorbit/bookorbit/releases'
 const GITHUB_COMMIT_BASE = 'https://github.com/bookorbit/bookorbit/commit'
+const FORK_RELEASES_BASE = 'https://github.com/yorphos/bookorbit/releases'
 
 function isVersionTag(value: string): boolean {
   return /^v\d+\.\d+\.\d+$/.test(value)
+}
+
+// A fork build: the upstream release it is based on, then -yrp.N.
+function isForkTag(value: string): boolean {
+  return /^v\d+\.\d+\.\d+-yrp\.\d+$/.test(value)
 }
 
 function extractSha(value: string): string | null {
@@ -30,14 +36,21 @@ function normalizeVersionLabel(value: string): string {
 export function buildSidebarVersionUi(version: string, updateAvailable: boolean | null, latestVersion: string | null): SidebarVersionUi {
   const currentRaw = version.trim()
   const latestRaw = (latestVersion ?? '').trim()
-  const currentIsTag = isVersionTag(currentRaw)
+  const currentIsFork = isForkTag(currentRaw)
+  const currentIsTag = isVersionTag(currentRaw) || currentIsFork
   const currentSha = extractSha(currentRaw)
   const currentLabelBase = normalizeVersionLabel(currentRaw)
   const showUpdate = Boolean(updateAvailable && latestRaw && currentLabelBase && currentIsTag)
 
   return {
     currentLabel: currentLabelBase,
-    currentHref: currentIsTag ? `${GITHUB_RELEASES_BASE}/tag/${currentRaw}` : currentSha ? `${GITHUB_COMMIT_BASE}/${currentSha}` : null,
+    currentHref: currentIsFork
+      ? `${FORK_RELEASES_BASE}/tag/${currentRaw}`
+      : currentIsTag
+        ? `${GITHUB_RELEASES_BASE}/tag/${currentRaw}`
+        : currentSha
+          ? `${GITHUB_COMMIT_BASE}/${currentSha}`
+          : null,
     showUpdate,
     updateVersionLabel: normalizeVersionLabel(latestRaw),
     updateHref: isVersionTag(latestRaw) ? `${GITHUB_RELEASES_BASE}/tag/${latestRaw}` : `${GITHUB_RELEASES_BASE}/latest`,

@@ -10235,6 +10235,8 @@
       "copyright": "Copyright (C) 2025-2026 neon.",
       "contributors": "Additional copyright is held by the respective BookOrbit contributors.",
       "licenseSummary": "Licensed under the GNU Affero General Public License, version 3 only, with additional terms. This software is provided without warranty. You may redistribute and modify it under those terms.",
+      "modifiedNotice": "This is a modified version of BookOrbit and is not an official BookOrbit release.",
+      "modifiedDetails": "Version {version}, modified {date}.",
       "sourceCode": "Source code",
       "license": "AGPLv3 license",
       "additionalTerms": "Additional terms"

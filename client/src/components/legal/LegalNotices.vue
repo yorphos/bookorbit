@@ -3,6 +3,7 @@ import { ExternalLink, X } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import { useLegalNotices } from './useLegalNotices'
+import { forkSource } from './forkSource'
 
 const { t } = useI18n()
 const { open, closeLegalNotices, handleOpenChange } = useLegalNotices()
@@ -10,6 +11,7 @@ const { open, closeLegalNotices, handleOpenChange } = useLegalNotices()
 const PROJECT_URL = 'https://github.com/bookorbit/bookorbit'
 const LICENSE_URL = `${PROJECT_URL}/blob/main/LICENSE`
 const ADDITIONAL_TERMS_URL = `${PROJECT_URL}/blob/main/ADDITIONAL_TERMS.md`
+const SOURCE_URL = forkSource.href
 </script>
 
 <template>
@@ -58,9 +60,16 @@ const ADDITIONAL_TERMS_URL = `${PROJECT_URL}/blob/main/ADDITIONAL_TERMS.md`
 
           <p class="text-foreground">{{ t('components.legalNotices.licenseSummary') }}</p>
 
+          <div class="space-y-1 rounded-md border border-border p-3 text-foreground" data-testid="modified-version">
+            <p class="font-semibold">{{ t('components.legalNotices.modifiedNotice') }}</p>
+            <p v-if="forkSource.version || forkSource.modified" class="text-muted-foreground">
+              {{ t('components.legalNotices.modifiedDetails', { version: forkSource.version || '-', date: forkSource.modified || '-' }) }}
+            </p>
+          </div>
+
           <div class="grid gap-2 sm:grid-cols-3">
             <a
-              :href="PROJECT_URL"
+              :href="SOURCE_URL"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2 font-medium text-foreground outline-hidden hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"

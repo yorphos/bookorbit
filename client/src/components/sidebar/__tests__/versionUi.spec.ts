@@ -106,4 +106,13 @@ describe('buildSidebarVersionUi', () => {
     expect(ui.currentLabel).toBe('')
     expect(ui.showUpdate).toBe(false)
   })
+
+  it('links fork builds to the fork release and still offers upstream updates', () => {
+    const ui = buildSidebarVersionUi('v3.6.0-yrp.2', true, 'v3.7.0')
+
+    expect(ui.currentLabel).toBe('v3.6.0-yrp.2')
+    expect(ui.currentHref).toBe('https://github.com/yorphos/bookorbit/releases/tag/v3.6.0-yrp.2')
+    expect(ui.showUpdate).toBe(true)
+    expect(ui.updateHref).toBe('https://github.com/bookorbit/bookorbit/releases/tag/v3.7.0')
+  })
 })
