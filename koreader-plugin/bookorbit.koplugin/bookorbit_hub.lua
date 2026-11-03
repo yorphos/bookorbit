@@ -1912,6 +1912,10 @@ function Hub:action(a)
         self.plugin:openSettings(self.catalog, a.view)
     elseif a.kind == "update" then
         self.plugin:applyUpdate(self.plugin.settings.update_latest_version)
+    elseif a.kind == "check_update" then
+        -- Says what it found and offers the install itself; the header then
+        -- shows the waiting update on its next repaint.
+        self.plugin:requestUpdateCheck(true, "hub")
     elseif a.kind == "sync_now" then
         self.plugin:startSweep()
     elseif a.kind == "classic" then

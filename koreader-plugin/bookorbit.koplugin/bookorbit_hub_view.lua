@@ -74,9 +74,13 @@ function View.button(title, width, action, primary, icon_name)
     return action and UI.hit(widget, action) or widget
 end
 
-local function iconButton(name, action)
+-- highlighted: a white icon in a black circle, for something waiting on the reader.
+local function iconButton(name, action, highlighted)
     local s = px(44)
-    return UI.hit(row({ w = s, h = s }, { UI.flex(0), UI.icon(name, px(23)), UI.flex(0) }), action)
+    local icon = highlighted
+            and UI.circle(px(38), { bg = ink.black }, UI.icon(name, px(21), { col = "white", sw = 2.5 }))
+        or UI.icon(name, px(23))
+    return UI.hit(row({ w = s, h = s }, { UI.flex(0), icon, UI.flex(0) }), action)
 end
 
 local function heading(title, w, action, subtitle)
@@ -89,7 +93,7 @@ local function heading(title, w, action, subtitle)
     end
     local line = row({ w = w, h = px(36) }, parts)
     if subtitle and subtitle ~= "" then
-        return stack({ w = w, gap = px(2) }, { line, label(subtitle, Theme.small, w, { col = ink.g5 }) })
+        line = stack({ w = w, gap = px(2) }, { line, label(subtitle, Theme.small, w, { col = ink.g5 }) })
     end
     return line
 end
@@ -216,6 +220,11 @@ function View.isList(kind)
     return listKinds[kind] == true
 end
 
+-- A quiet section label: small bold text instead of a heading.
+local function caption(text, w)
+    return label(text, Theme.small, w, { b = true, col = ink.g5 })
+end
+
 local function shelf(books, w, count, compact)
     count = math.min(count or 4, #books)
     if count == 0 then
@@ -274,14 +283,16 @@ local function footer(g, tab)
 end
 
 local function header(g, state)
-    local brand_width = g.content - px(state.updateVersion and 176 or 132)
+    local brand_width = g.content - px(176)
     local brand = label("BookOrbit", Theme.brand, brand_width, { serif = true, b = true })
     return stack({ w = g.w, pad = { px(8), g.margin, px(8), g.margin }, gap = px(7) }, {
         row({ w = g.content, h = px(44) }, {
             iconButton("chevron-left", { kind = "back" }),
             UI.hit(brand, { kind = "tab", tab = "home" }),
             iconButton("refresh-cw", { kind = "refresh" }),
-            state.updateVersion and iconButton("download", { kind = "update" }) or space(0, 1),
+            -- Check for updates; once one is known, the same spot installs it.
+            state.updateVersion and iconButton("download", { kind = "update" }, true)
+                or iconButton("download", { kind = "check_update" }),
             iconButton("sliders-horizontal", { kind = "settings" }),
         }),
         View.button(
@@ -424,35 +435,19 @@ end
 
 local function requestDetail(state, g)
     local b, r, w = state.book or {}, state.body or {}, g.content
-    local children = { heading("Book Request", w), View.card(b, w), heading(Model.stage(r), w) }
+    local children = { View.card(b, w), heading(Model.stage(r), w) }
     children[#children + 1] = stepper(r, w)
     local percent = r.status == "downloading" and Model.percent(r.progressPercent)
     if percent then
         children[#children + 1] = UI.bar(w, px(8), percent)
         children[#children + 1] = label(string.format("%d%% reported by the downloader", percent), Theme.small, w)
     end
-    if r.status == "pending" then
-        children[#children + 1] = label(
-            "Waiting for administrator approval. BookOrbit will use your configured sources after approval.",
-            Theme.body,
-            w,
-            { lines = 3 }
-        )
-    elseif r.status == "failed" then
-        children[#children + 1] = label(
-            "Acquisition failed. Use Change file to choose another release, or retry if permitted.",
-            Theme.body,
-            w,
-            { lines = 3 }
-        )
-    elseif r.status == "needs_review" then
-        children[#children + 1] = label(
-            r.languageNeedsReview and "The downloaded language did not match. The import is held for review."
-                or "The import needs administrator review.",
-            Theme.body,
-            w,
-            { lines = 3 }
-        )
+    local explain = r.status == "pending" and "Waiting for administrator approval."
+        or r.status == "failed" and "Acquisition failed. Choose another file, or retry if permitted."
+        or r.status == "needs_review"
+            and (r.languageNeedsReview and "The downloaded language did not match. Held for review." or "The import needs administrator review.")
+    if explain then
+        children[#children + 1] = label(explain, Theme.body, w, { lines = 2 })
     end
     if r.status == "available" and r.bookId and not r.replacementBookId then
         children[#children + 1] = View.button(
@@ -470,84 +465,145 @@ local function requestDetail(state, g)
             { kind = "swap", bookId = r.bookId, previousBookId = r.replacementBookId }
         )
     end
-    children[#children + 1] = View.button("Refresh status", w, { kind = "refresh" }, false, "refresh-cw")
+    local more = {}
     if r.canChooseRelease then
-        children[#children + 1] = View.button("Change file", w, { kind = "releases" })
-    end
-    if r.canRetry then
-        children[#children + 1] = View.button("Retry automatic acquisition", w, { kind = "retry" })
-    end
-    if r.canDiscardHeld then
-        children[#children + 1] = View.button("Discard held file and try another release", w, { kind = "discard_held" })
+        more[#more + 1] = { "Change file", { kind = "releases" } }
     end
     if r.canReplace then
-        children[#children + 1] = View.button("Change file", w, { kind = "replace_request" })
+        more[#more + 1] = { "Change file", { kind = "replace_request" } }
+    end
+    if r.canRetry then
+        more[#more + 1] = { "Retry", { kind = "retry" } }
+    end
+    if r.canDiscardHeld then
+        more[#more + 1] = { "Discard held file", { kind = "discard_held" } }
     end
     if r.canCancel then
-        children[#children + 1] = View.button("Cancel request", w, { kind = "cancel_request" })
+        more[#more + 1] = { "Cancel request", { kind = "cancel_request" } }
     end
-    children[#children + 1] = label(
-        "Status updates by itself while BookOrbit is open, more slowly the longer nothing changes. When the book is ready, BookOrbit syncs it and tells you.",
-        Theme.small,
-        w,
-        { lines = 3, col = ink.g5 }
-    )
+    for i = 1, #more, 2 do
+        children[#children + 1] = actions({ more[i], more[i + 1] }, w)
+    end
+    children[#children + 1] =
+        label("Updates by itself while BookOrbit is open.", Theme.small, w, { lines = 1, col = ink.g5 })
     return stack({ w = w, gap = px(12) }, children)
 end
 
 local function home(state, g)
     local body, w = state.body or {}, g.content
-    local children = {}
+    local sections = {}
+    local function add(priority, ...)
+        sections[#sections + 1] = { priority = priority, items = { ... } }
+    end
+    if state.canResume then
+        add(1, View.button("Resume Reading", w, { kind = "resume_reading" }, true))
+    end
     if state.homeStats then
-        children[#children + 1] = UI.hit(
-            row({ w = w, h = px(26), gap = px(6) }, {
-                UI.icon("flame", px(16)),
-                label(state.homeStats, Theme.small, w - px(22), { b = true }),
-            }),
-            { kind = "stats" }
+        add(
+            6,
+            UI.hit(
+                row({ w = w, h = px(26), gap = px(6) }, {
+                    UI.icon("flame", px(16)),
+                    label(state.homeStats, Theme.small, w - px(22), { b = true }),
+                }),
+                { kind = "stats" }
+            )
         )
     end
-    for _, item in ipairs({
+    add(
+        4,
         heading(
             "For You",
             w,
             { kind = "tab", tab = "discover" },
             body.recommendationReason or "Discover your next book"
         ),
-        shelf(state.recommendations or {}, w, 4, true),
+        shelf(state.recommendations or {}, w, 4, true)
+    )
+    add(
+        2,
         heading("Continue Reading", w, { kind = "books_filter", filter = "reading" }),
-    }) do
-        children[#children + 1] = item
-    end
-    if state.continueReading and state.continueReading[1] then
-        children[#children + 1] = View.card(state.continueReading[1], w, true)
-    else
-        children[#children + 1] = label("Your next chapter starts in My Books.", Theme.small, w)
-    end
+        state.continueReading and state.continueReading[1] and View.card(state.continueReading[1], w, true)
+            or label("Your next chapter starts in My Books.", Theme.small, w)
+    )
     if state.ready and #state.ready > 0 then
-        children[#children + 1] = heading("Ready to Read", w, { kind = "request_filter", filter = "ready" })
-        children[#children + 1] = shelf(state.ready, w, 4, true)
+        local first = state.ready[1]
+        local more = #(body.ready or {}) - 1
+        first.hint = "Ready to read" .. (more > 0 and (" · " .. more .. " more") or "")
+        add(3, heading("Ready to Read", w, { kind = "request_filter", filter = "ready" }), View.card(first, w, true))
     end
-    children[#children + 1] = heading("Recent Requests", w, { kind = "tab", tab = "requests" })
-    if state.requests and state.requests[1] then
-        children[#children + 1] = View.card(state.requests[1], w, true)
-    else
-        children[#children + 1] = label(
-            body.requestsUnavailable and "Requests unavailable. Refresh to try again." or "No recent requests.",
-            Theme.small,
-            w
-        )
+    add(
+        5,
+        heading("Recent Requests", w, { kind = "tab", tab = "requests" }),
+        state.requests and state.requests[1] and View.card(state.requests[1], w, true)
+            or label(
+                body.requestsUnavailable and "Requests unavailable. Refresh to try again." or "No recent requests.",
+                Theme.small,
+                w
+            )
+    )
+    add(
+        1,
+        actions({
+            { "Stats", { kind = "stats" } },
+            { "Friends", { kind = "social" } },
+            { "Series", { kind = "series_list" } },
+            { "Downloads", { kind = "books_filter", filter = "local" } },
+        }, w)
+    )
+    local gap = px(7)
+    local function height()
+        local total, count = 0, 0
+        for _, section in ipairs(sections) do
+            if not section.dropped then
+                for _, item in ipairs(section.items) do
+                    total, count = total + item:getSize().h, count + 1
+                end
+            end
+        end
+        return total + math.max(0, count - 1) * gap
     end
-    children[#children + 1] = actions({
-        { "Stats", { kind = "stats" } },
-        { "Friends", { kind = "social" } },
-        { "Series", { kind = "series_list" } },
-        { "Downloads", { kind = "books_filter", filter = "local" } },
-    }, w)
-    if state.canResume then
-        table.insert(children, 1, View.button("Resume Reading", w, { kind = "resume_reading" }, true))
+    while height() > (g.avail or g.body) do
+        local victim
+        for _, section in ipairs(sections) do
+            if not section.dropped and section.priority > 1 and (not victim or section.priority >= victim.priority) then
+                victim = section
+            end
+        end
+        if not victim then
+            break
+        end
+        victim.dropped = true
     end
-    return stack({ w = w, gap = px(7) }, children)
+    -- A smaller section left out early may fit again once a bigger one went.
+    local dropped = {}
+    for _, section in ipairs(sections) do
+        if section.dropped then
+            dropped[#dropped + 1] = section
+        end
+    end
+    table.sort(dropped, function(a, b)
+        return a.priority < b.priority
+    end)
+    for _, section in ipairs(dropped) do
+        section.dropped = false
+        if height() > (g.avail or g.body) then
+            section.dropped = true
+        end
+    end
+    local children = {}
+    for _, section in ipairs(sections) do
+        for _, item in ipairs(section.items) do
+            if section.dropped then
+                if item.free then
+                    item:free()
+                end
+            else
+                children[#children + 1] = item
+            end
+        end
+    end
+    return stack({ w = w, gap = gap }, children)
 end
 
 local function detail(state, g)
@@ -596,28 +652,52 @@ local function detail(state, g)
     if b.matchKey then
         children[#children + 1] = View.button("Remove from Matches", w, { kind = "match_remove", book = b })
     end
+    local explore = actions({
+        { "By this author", { kind = "author", q = b.authors and b.authors[1] } },
+        {
+            b.seriesName and "This series" or "Genres",
+            { kind = b.seriesName and "series" or "genres", book = b, q = b.seriesName },
+        },
+        { "More like this", { kind = "more_like_this", book = b } },
+    }, w)
+    local more = actions({
+        { "Description & editions", { kind = "editions", book = b } },
+        { b.bookId and "Collections / files" or "Request / sources", { kind = "book_options", book = b } },
+    }, w)
+    -- The description takes the room left on the first page, 3 to 8 lines;
+    -- the full text is one tap away.
+    local used = more:getSize().h + explore:getSize().h + (#children + 1) * px(12)
+    for _, child in ipairs(children) do
+        used = used + child:getSize().h
+    end
+    local probe = label("Ag", Theme.body, w, { serif = true, lines = 1 })
+    local line_h = probe:getSize().h
+    if probe.free then
+        probe:free()
+    end
+    local room = math.floor(((g.avail or g.body) - used - px(12)) / math.max(1, line_h))
     children[#children + 1] = label(
         Model.plain(b.description) ~= "" and Model.plain(b.description) or "No description supplied by this catalog.",
         Theme.body,
         w,
-        { serif = true, lines = 5 }
+        { serif = true, lines = math.max(3, math.min(8, room)) }
     )
-    children[#children + 1] = actions({
-        { "Description & editions", { kind = "editions", book = b } },
-        { b.bookId and "Collections / files" or "Request / sources", { kind = "book_options", book = b } },
-    }, w)
-    children[#children + 1] = heading("Explore related books", w)
-    children[#children + 1] = actions({
-        { "By this author", { kind = "author", q = b.authors and b.authors[1] } },
-        {
-            b.seriesName and "In this series" or "Related genres",
-            { kind = b.seriesName and "series" or "genres", book = b, q = b.seriesName },
-        },
-    }, w)
-    children[#children + 1] =
-        View.button("More like this in Roulette", w, { kind = "more_like_this", book = b }, false, "shuffle")
+    children[#children + 1] = more
+    children[#children + 1] = explore
+    local function fits(extra)
+        local total = #children * px(12)
+        for _, child in ipairs(children) do
+            total = total + child:getSize().h
+        end
+        return total + px(12) + extra:getSize().h <= (g.avail or g.body)
+    end
     if state.related and #state.related > 0 then
-        children[#children + 1] = shelf(state.related, w, 4)
+        local related = shelf(state.related, w, 4, true)
+        if fits(related) then
+            children[#children + 1] = related
+        elseif related.free then
+            related:free()
+        end
     end
     return stack({ w = w, gap = px(12) }, children)
 end
@@ -721,34 +801,40 @@ end
 
 local function settings(state, g)
     local w = g.content
+    local function section(title, buttons)
+        return stack({ w = w, gap = px(6) }, { caption(title, w), actions(buttons, w) })
+    end
     return stack({ w = w, gap = px(14) }, {
         heading("Settings", w, nil, "BookOrbit " .. (state.version or "") .. " · " .. (state.username or "")),
-        heading("Reading & device", w),
-        actions({
+        section("Reading & device", {
             { "Display & text", { kind = "setting", view = "home" } },
-            { "Startup & shortcuts", { kind = "setting", view = "opening" } },
-        }, w),
-        actions({ { "Downloads", { kind = "setting", view = "downloads" } }, { "Storage", { kind = "storage" } } }, w),
-        heading("Account & sync", w),
-        actions({
+            { "Startup", { kind = "setting", view = "opening" } },
+            { "Downloads", { kind = "setting", view = "downloads" } },
+        }),
+        section("Account & sync", {
             { "Account", { kind = "setting", view = "account" } },
+            { "Sync options", { kind = "setting", view = "sync" } },
+            { "Sync now", { kind = "sync_now" } },
+        }),
+        section("BookOrbit", {
+            { "Reading stats", { kind = "stats" } },
+            { "Friends", { kind = "social" } },
+            { "Hub options", { kind = "hub_settings" } },
+        }),
+        section("Help", {
+            { "Sync status", { kind = "sync_status" } },
+            { "Diagnostics", { kind = "diagnostics" } },
             {
-                "Sync preferences",
-                { kind = "setting", view = "sync" },
+                state.updateVersion and ("Update to " .. state.updateVersion) or "About & updates",
+                { kind = "setting", view = "about" },
+                state.updateVersion ~= nil,
             },
-        }, w),
-        actions({ { "Sync now", { kind = "sync_now" } }, { "Sync status", { kind = "sync_status" } } }, w),
-        heading("BookOrbit hub", w),
-        actions({ { "Reading stats", { kind = "stats" } }, { "Friends", { kind = "social" } } }, w),
-        actions({ { "Hub options", { kind = "hub_settings" } }, { "Diagnostics", { kind = "diagnostics" } } }, w),
-        heading("Application", w),
-        View.button(
-            state.updateVersion and ("Update to " .. state.updateVersion) or "About & updates",
-            w,
-            { kind = "setting", view = "about" },
-            state.updateVersion ~= nil
-        ),
-        actions({ { "Classic catalog", { kind = "classic" } }, { "KOReader files", { kind = "close_hub" } } }, w),
+        }),
+        section("Elsewhere", {
+            { "Storage", { kind = "storage" } },
+            { "Classic catalog", { kind = "classic" } },
+            { "KOReader files", { kind = "close_hub" } },
+        }),
     })
 end
 
@@ -784,65 +870,58 @@ local function stats(state, g)
             w,
             { lines = 3 }
         )
-        return stack({ w = w, gap = px(10) }, children)
+        return stack({ w = w, gap = px(12) }, children)
     end
-    local half = math.floor((w - px(8)) / 2)
-    local function figure(value, caption)
-        return stack({ w = half, gap = px(2) }, {
-            label(value, 22, half, { serif = true, b = true }),
-            label(caption, Theme.small, half, { col = ink.g5 }),
+    local quarter = math.floor((w - px(24)) / 4)
+    local figures = {}
+    for _, f in ipairs({
+        { minutes.today, "Today" },
+        { minutes.week, "7 days" },
+        { minutes.month, "30 days" },
+        { minutes.year, "12 months" },
+    }) do
+        figures[#figures + 1] = stack({ w = quarter, gap = px(2) }, {
+            label(Model.minutes(f[1]), 19, quarter, { serif = true, b = true }),
+            label(f[2], Theme.small, quarter, { col = ink.g5 }),
         })
     end
-    children[#children + 1] = row({ w = w, gap = px(8), valign = "top" }, {
-        figure(Model.minutes(minutes.today), "Today"),
-        figure(Model.minutes(minutes.week), "Last 7 days"),
-    })
-    children[#children + 1] = row({ w = w, gap = px(8), valign = "top" }, {
-        figure(Model.minutes(minutes.month), "Last 30 days"),
-        figure(Model.minutes(minutes.year), "Last 12 months"),
-    })
-    children[#children + 1] = heading("Last two weeks", w)
-    children[#children + 1] = dayBars(body.lastFourteenDays or {}, w, px(70))
-    children[#children + 1] = heading("Streak", w)
+    children[#children + 1] = row({ w = w, gap = px(8), valign = "top" }, figures)
+    children[#children + 1] = caption("Last two weeks", w)
+    children[#children + 1] = dayBars(body.lastFourteenDays or {}, w, px(80))
+    local goal_text = tonumber(goal.goal)
+            and goal.goal > 0
+            and (tostring(goal.done or 0) .. " of " .. tostring(goal.goal) .. " books in " .. tostring(goal.year))
+        or (tostring(goal.done or 0) .. " books finished in " .. tostring(goal.year or ""))
     children[#children + 1] = label(
         tostring(streak.current or 0)
-            .. "-day streak · longest "
+            .. "-day streak (longest "
             .. tostring(streak.longest or 0)
-            .. " days · "
-            .. tostring(body.readingDaysThisYear or 0)
-            .. " reading days this year",
+            .. ") · "
+            .. goal_text,
         Theme.body,
         w,
         { lines = 2 }
     )
-    children[#children + 1] = heading("Goal for " .. tostring(goal.year or ""), w)
     if tonumber(goal.goal) and goal.goal > 0 then
         children[#children + 1] = UI.bar(w, px(8), math.min(100, (goal.done or 0) * 100 / goal.goal))
-        children[#children + 1] =
-            label(tostring(goal.done or 0) .. " of " .. tostring(goal.goal) .. " books", Theme.small, w, { b = true })
-    else
-        children[#children + 1] = label(
-            tostring(goal.done or 0) .. " books finished. Set a yearly goal on the BookOrbit dashboard.",
-            Theme.small,
-            w,
-            { lines = 2 }
-        )
     end
     children[#children + 1] = actions({
         { "Finished: " .. tostring(body.finishedTotal or 0), { kind = "finished_books" } },
         { "Reading: " .. tostring(body.readingNow or 0), { kind = "books_filter", filter = "reading" } },
     }, w)
-    if state.finished and #state.finished > 0 then
-        children[#children + 1] = heading("Recently finished", w)
-        children[#children + 1] = shelf(state.finished, w, 4, true)
-    end
-    return stack({ w = w, gap = px(10) }, children)
+    return stack({ w = w, gap = px(12) }, children)
 end
 
-local function lines(items, w, empty)
+-- At most limit lines, the newest first, and how many more there are.
+local function lines(items, w, empty, limit)
     local out = {}
-    for _, text in ipairs(items or {}) do
-        out[#out + 1] = label(text, Theme.small, w, { lines = 2 })
+    limit = limit or 3
+    for i, text in ipairs(items or {}) do
+        if i > limit then
+            out[#out + 1] = label("and " .. (#items - limit) .. " more", Theme.small, w, { col = ink.g5 })
+            break
+        end
+        out[#out + 1] = label(text, Theme.small, w, { lines = 1 })
     end
     if #out == 0 then
         out[1] = label(empty, Theme.small, w, { col = ink.g5 })
@@ -853,27 +932,25 @@ end
 local function diagnostics(state, g)
     local d, w = state.diag or {}, g.content
     local cache = d.cache or {}
+    local gap = px(8)
     local children = {
         heading("Diagnostics", w, nil, "BookOrbit " .. tostring(d.version or "") .. " · " .. tostring(d.user or "")),
         label(
             (d.connected and "Connected" or "Offline")
                 .. " · "
                 .. tostring(cache.files or 0)
-                .. " saved pages ("
+                .. " saved pages, "
                 .. Model.bytes(cache.bytes)
-                .. ", "
-                .. tostring(cache.dirty or 0)
-                .. " waiting to be written) · "
+                .. " · "
                 .. tostring(d.covers or 0)
-                .. " covers ("
-                .. Model.bytes(d.coverBytes)
-                .. ")",
+                .. " covers, "
+                .. Model.bytes(d.coverBytes),
             Theme.small,
             w,
-            { lines = 3 }
+            { lines = 2 }
         ),
-        heading("Saved actions", w),
-        lines(d.outbox, w, "Nothing waiting to be sent."),
+        caption("Waiting to be sent", w),
+        lines(d.outbox, w, "Nothing.", 2),
     }
     if d.outbox and #d.outbox > 0 then
         children[#children + 1] = actions({
@@ -881,48 +958,73 @@ local function diagnostics(state, g)
             { "Discard all", { kind = "outbox_discard" } },
         }, w)
     end
-    children[#children + 1] = heading("Followed requests", w)
-    children[#children + 1] = lines(d.watched, w, "No request is being followed.")
-    children[#children + 1] = heading("Downloads and cleanup", w)
-    children[#children + 1] = label("Last run: " .. tostring(d.upkeep), Theme.small, w, { lines = 2 })
-    children[#children + 1] = heading("Request timing", w)
-    children[#children + 1] = lines(d.timings, w, "No requests timed since BookOrbit opened.")
-    children[#children + 1] = heading("Recent events", w)
-    children[#children + 1] = lines(d.events, w, "Nothing recorded yet.")
-    children[#children + 1] = actions({
+    children[#children + 1] = caption("Followed requests", w)
+    children[#children + 1] = lines(d.watched, w, "None.", 2)
+    children[#children + 1] = caption("Background work", w)
+    local background = { "Downloads and cleanup: " .. tostring(d.upkeep) }
+    for _, t in ipairs(d.timings or {}) do
+        background[#background + 1] = t
+    end
+    children[#children + 1] = lines(background, w, "", 3)
+    local buttons = actions({
         { "Run downloads now", { kind = "upkeep_now" } },
         { "Clear saved pages", { kind = "clear_cache" } },
     }, w)
-    return stack({ w = w, gap = px(10) }, children)
+    -- Recent events take whatever room is left, newest first.
+    local used = buttons:getSize().h + (#children + 2) * gap
+    for _, child in ipairs(children) do
+        used = used + child:getSize().h
+    end
+    local caption_events = caption("Recent events", w)
+    local probe = label("Ag", Theme.small, w, { lines = 1 })
+    local room =
+        math.floor(((g.avail or g.body) - used - caption_events:getSize().h - gap) / (probe:getSize().h + px(4)))
+    if probe.free then
+        probe:free()
+    end
+    if room >= 1 then
+        children[#children + 1] = caption_events
+        children[#children + 1] = lines(d.events, w, "Nothing recorded yet.", math.min(6, math.max(1, room - 1)))
+    end
+    children[#children + 1] = buttons
+    return stack({ w = w, gap = gap }, children)
 end
 
 local function hubSettings(state, g)
     local w = g.content
-    local children = { heading("Hub options", w, nil, "Changes apply at once") }
+    local vw = math.floor(w * 0.36)
+    local lw = w - vw - px(12)
+    local children = { heading("Hub options", w, nil, "Tap a value to change it") }
     for _, option in ipairs(Model.OPTIONS) do
-        children[#children + 1] = stack({ w = w, gap = px(4) }, {
-            label(option.label, Theme.small, w, { lines = 2, col = ink.g5 }),
-            View.button(Model.settingLabel(state.settings, option.key), w, { kind = "hub_option", key = option.key }),
+        children[#children + 1] = row({ w = w, gap = px(12) }, {
+            label(option.label, Theme.body, lw, { lines = 2 }),
+            View.button(Model.settingLabel(state.settings, option.key), vw, { kind = "hub_option", key = option.key }),
         })
     end
     children[#children + 1] = label(
-        "Downloads while charging use your Wi-Fi when it is already on. Removing finished downloads keeps your notes and highlights, which BookOrbit stores. Error reports contain the error text and plugin version only.",
+        "Downloads use Wi-Fi only when it is on. Removed downloads keep their notes on BookOrbit.",
         Theme.small,
         w,
-        { lines = 5, col = ink.g5 }
+        { lines = 2, col = ink.g5 }
     )
-    return stack({ w = w, gap = px(10) }, children)
+    return stack({ w = w, gap = px(8) }, children)
 end
 
 function View.build(state, w, h)
     local g = Theme.geometry(w, h)
-    -- Reserve the native scrollbar's width. It appears only when font scaling
-    -- or a long page needs another screenful; there is no animated scrolling.
+    -- Room for a scrollbar. Screens are built to fit; it appears only when a
+    -- very large text size leaves no other way.
     g.content = g.content - px(10)
     local hit_start = UI.hitMark()
     local kind = state.route.kind
     state.coverRects = {}
     cover_rects = state.coverRects
+    local note
+    if not View.isList(kind) and kind ~= "settings" and kind ~= "hub_settings" and kind ~= "diagnostics" then
+        note = notice(state, g.content, false)
+    end
+    local note_gap = px(6)
+    g.avail = g.body - (note and (note:getSize().h + note_gap) or 0)
     local body
     if kind == "roulette" then
         body = roulette(state, g)
@@ -949,15 +1051,15 @@ function View.build(state, w, h)
     end
     cover_rects = nil
     local body_widgets = {}
-    if not View.isList(kind) and kind ~= "settings" and kind ~= "hub_settings" and kind ~= "diagnostics" then
-        body_widgets[#body_widgets + 1] = notice(state, g.content, false)
+    if note then
+        body_widgets[#body_widgets + 1] = note
     end
     body_widgets[#body_widgets + 1] = body
-    local content = stack({ w = g.content, gap = px(6) }, body_widgets)
+    local content = stack({ w = g.content, gap = note_gap }, body_widgets)
     state.measuredBodyHeight = content:getSize().h
     state.bodyHitFirst, state.bodyHitLast = hit_start + 1, UI.hitMark()
     state.bodyBounds = Geom:new { x = g.margin, y = g.header, w = g.content, h = g.body }
-    if View.isList(kind) then
+    if View.isList(kind) or state.measuredBodyHeight <= g.body then
         state.scrolling = nil
         return UI.overlay(w, h, {
             { widget = header(g, state) },

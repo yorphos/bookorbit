@@ -138,14 +138,14 @@ for _, name in ipairs(names) do
     local count = 0
     for _, hit in ipairs(page.hits) do
         -- Footer tabs are a quarter of the screen wide; "See all" links also open tabs.
-        if hit.action and hit.action.kind == "tab" and hit.dimen.w == math.floor(1072 / 4) and hit.dimen.y >= s.bodyBounds.y + s.bodyBounds.h then
+        if hit.action and hit.action.kind == "tab" and hit.dimen and hit.dimen.w == math.floor(1072 / 4) and hit.dimen.y >= s.bodyBounds.y + s.bodyBounds.h then
             assert(hit.dimen.x >= 0 and hit.dimen.x + hit.dimen.w <= 1072)
             assert(hit.dimen.h >= 70, "Navigation target too small")
             count = count + 1
         end
     end
     assert(count == 4, "Four persistent navigation targets required")
-    if View.isList(s.route.kind) then assert(s.measuredBodyHeight <= s.bodyBounds.h, name .. " list overflows") end
+    assert(s.measuredBodyHeight <= s.bodyBounds.h and s.scrolling == nil, name .. " does not fit the screen")
     print(name, "body", s.measuredBodyHeight, "viewport", s.bodyBounds.h, "hits", #page.hits)
     page:free()
 end

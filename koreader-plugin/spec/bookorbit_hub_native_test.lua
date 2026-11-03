@@ -110,6 +110,10 @@ hub:navigate({kind="home"})
 plugin.settings.update_latest_version = "2.4.1"; hub:refreshView(); tap("update")
 assert(updated == "2.4.1", "Header update must invoke the existing updater")
 plugin.settings.update_latest_version = nil; hub:refreshView()
+local checked
+function plugin:requestUpdateCheck(interactive) checked = interactive end
+tap("check_update")
+assert(checked == true, "The header's update button runs an interactive update check")
 tap("tab", "discover"); assert(hub.route.kind == "discover")
 assert(hub.state.scrolling == nil, "Book lists must never scroll")
 assert(hub.state.measuredBodyHeight <= hub.state.bodyBounds.h, "Book list and pagination must fit the screen")
@@ -118,20 +122,15 @@ hub:turnPage(1); assert(hub.state.pageLabel:find("Page 2", 1, true))
 hub:action({kind="settings"}); assert(hub.route.kind == "settings")
 hub:navigate({kind="request_detail", id=77, request={id=77, status="approved"}})
 paint()
+-- Screens fit on one page: no scrolling and no paging outside long book lists.
+assert(hub.state.scrolling == nil and hub.state.measuredBodyHeight <= hub.state.bodyBounds.h, "Request page fits without scrolling")
 local manager = require("ui/uimanager")
-manager:_repaint()
-local paints, original_paint = 0, hub.page.paintTo
-hub.page.paintTo = function(...) paints = paints + 1; return original_paint(...) end
-local bounds = hub.state.bodyBounds
-hub.page:handleEvent(require("ui/event"):new("Gesture", {ges = "swipe", direction = "north", distance = 400,
-    pos = Geom:new{x = bounds.x + bounds.w / 2, y = bounds.y + bounds.h / 2, w = 1, h = 1}}))
-assert(manager._dirty[hub.page], "Scrolling must mark the visible page dirty, not just advance its offset")
-manager:_repaint()
-assert(paints > 0, "The actual KOReader repaint loop must redraw scrolled content")
-local scroll_y = hub.state.scrolling:getScrolledOffset().y
-assert(scroll_y > 0, "Native vertical swipe must reach overflowing content")
-hub:openBook(records[1]); hub:back()
-assert(hub.state.scrolling:getScrolledOffset().y == scroll_y, "Back must preserve native scroll position")
+for _, kind in ipairs({"settings", "stats", "diagnostics", "hub_settings", "home"}) do
+    hub:navigate({kind = kind}); paint()
+    assert(hub.state.scrolling == nil and hub.state.measuredBodyHeight <= hub.state.bodyBounds.h, kind .. " fits without scrolling")
+end
+hub:navigate({kind = "detail", book = {title = "Long", authors = {"An author"}, description = string.rep("A long public-domain description. ", 80)}}); paint()
+assert(hub.state.scrolling == nil and hub.state.measuredBodyHeight <= hub.state.bodyBounds.h, "A long description is cut to fit")
 hub:navigate({kind = "search", q = "classics", scope = "all", page = 1})
 assert(hub.state.scrolling == nil and hub.state.measuredBodyHeight <= hub.state.bodyBounds.h, "Search must fit without scrolling")
 hub.state.cached = true; hub.state.body.partial = true; hub:refreshView()

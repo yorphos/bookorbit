@@ -280,18 +280,18 @@ M.OPTIONS = {
     },
     {
         key = "hub_charging_series",
-        label = "Also download the next book in series you are reading",
+        label = "Also the next book of series you are reading",
         values = { { false, "Off" }, { true, "On" } },
     },
     {
         key = "hub_cleanup_days",
-        label = "Remove finished downloads",
+        label = "Remove downloads this long after finishing",
         values = {
             { 0, "Never" },
-            { 14, "14 days after finishing" },
-            { 30, "30 days after finishing" },
-            { 60, "60 days after finishing" },
-            { 90, "90 days after finishing" },
+            { 14, "14 days" },
+            { 30, "30 days" },
+            { 60, "60 days" },
+            { 90, "90 days" },
         },
     },
     {
@@ -301,22 +301,22 @@ M.OPTIONS = {
     },
     {
         key = "hub_flash_every",
-        label = "Full refresh to clear ghosting",
+        label = "Flash to clear ghosting",
         values = {
-            { "screen", "On every screen change" },
+            { "screen", "Every screen" },
             { 4, "Every 4 screens" },
             { 8, "Every 8 screens" },
-            { 0, "Never, and no flash when a message closes" },
+            { 0, "Never" },
         },
     },
     {
         key = "hub_error_reports",
-        label = "Send error reports to the BookOrbit server log",
+        label = "Send error reports to the server log",
         values = { { false, "Off" }, { true, "On" } },
     },
     {
         key = "hub_direct_requests",
-        label = "Quick status checks without a background process",
+        label = "Quick status checks (no background process)",
         values = { { false, "Off" }, { true, "On" } },
     },
 }
