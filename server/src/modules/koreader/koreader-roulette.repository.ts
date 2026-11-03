@@ -45,6 +45,23 @@ export class KoreaderRouletteRepository {
       rows.filter((row) => ['match', 'pass'].includes((row.data as RouletteRecord).decision)).map((row) => (row.data as RouletteRecord).key),
     );
   }
+  /** Keys among `keys` that already have any decision, skips included. */
+  async decided(userId: number, keys: string[]) {
+    if (!keys.length) return new Set<string>();
+    const rows = await this.db
+      .select()
+      .from(TABLE)
+      .where(
+        and(
+          eq(TABLE.userId, userId),
+          inArray(
+            TABLE.category,
+            keys.map((key) => PREFIX + 'book:' + key),
+          ),
+        ),
+      );
+    return new Set(rows.filter((row) => (row.data as RouletteRecord).decision !== 'remove').map((row) => (row.data as RouletteRecord).key));
+  }
   async matches(userId: number, page: number, q = '', genre = '', sort = 'recent') {
     const rows = await this.db
       .select()

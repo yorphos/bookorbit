@@ -1,4 +1,19 @@
-import { Body, Controller, Get, Header, Headers, Param, ParseEnumPipe, ParseIntPipe, Put, Query, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Header,
+  Headers,
+  Param,
+  ParseEnumPipe,
+  ParseIntPipe,
+  Put,
+  Query,
+  Res,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { KoreaderEtagInterceptor } from './koreader-etag.interceptor';
 import type { FastifyReply } from 'fastify';
 
 import { KOREADER_DASHBOARD_SECTION_TYPE } from '@bookorbit/types';
@@ -22,6 +37,7 @@ import {
 
 @Public()
 @UseGuards(KoreaderAuthGuard)
+@UseInterceptors(KoreaderEtagInterceptor)
 @Controller('koreader/plugin/catalog')
 export class KoreaderCatalogController {
   constructor(private readonly catalogService: KoreaderCatalogService) {}

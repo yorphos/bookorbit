@@ -4,6 +4,8 @@ import { KoreaderRouletteService } from './koreader-roulette.service';
 import { KoreaderRouletteRepository } from './koreader-roulette.repository';
 import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
 import { KoreaderHubService } from './koreader-hub.service';
+import { KoreaderCoverCacheService } from './koreader-cover-cache.service';
+import { KoreaderSocialRepository } from './koreader-social.repository';
 import { KoreaderHubController } from './koreader-hub.controller';
 import { CollectionModule } from '../collection/collection.module';
 import { UserPreferencesModule } from '../user-preferences/user-preferences.module';
@@ -97,6 +99,8 @@ import { KoreaderSyncEstimateCleanupService } from './koreader-sync-estimate-cle
     KoreaderRequestsService,
     KoreaderDiscoveryService,
     KoreaderExternalCatalogService,
+    KoreaderCoverCacheService,
+    KoreaderSocialRepository,
     KoreaderDeliveryService,
     KoreaderService,
     KoreaderHashLinkService,

@@ -2,7 +2,8 @@ import { KoreaderCoverQueryDto } from './dto/koreader-discovery.dto';
 import type { FastifyReply } from 'fastify';
 import { KoreaderRequestPageDto } from './dto/koreader-requests.dto';
 import { KoreaderBrowseQueryDto, KoreaderWorkParamsDto, KoreaderBulkRequestsDto } from './dto/koreader-discovery.dto';
-import { Body, Controller, Get, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Res, UseGuards, UseInterceptors } from '@nestjs/common';
+import { KoreaderEtagInterceptor } from './koreader-etag.interceptor';
 import { Permission } from '@bookorbit/types';
 import { Public } from '../../common/decorators/public.decorator';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
@@ -15,6 +16,7 @@ import { KoreaderDiscoveryQueryDto } from './dto/koreader-discovery.dto';
 @Public()
 @UseGuards(KoreaderAuthGuard)
 @RequirePermission(Permission.BookRequestAccess)
+@UseInterceptors(KoreaderEtagInterceptor)
 @Controller('koreader/plugin/discovery')
 export class KoreaderDiscoveryController {
   constructor(private readonly discovery: KoreaderDiscoveryService) {}

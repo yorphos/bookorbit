@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { KoreaderCreateRequestDto } from './koreader-requests.dto';
 
 export class KoreaderHubPageDto {
@@ -37,4 +37,62 @@ export class KoreaderWishlistKeyDto {
   @IsString()
   @Matches(/^[a-f0-9]{32}$/)
   key!: string;
+}
+
+export class KoreaderCreateCollectionDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  name!: string;
+}
+
+export class KoreaderNextQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  bookId!: number;
+}
+
+export class KoreaderSocialSharingDto {
+  @IsBoolean()
+  share!: boolean;
+}
+
+export class KoreaderRecommendDto {
+  @IsInt()
+  @Min(1)
+  bookId!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  note?: string;
+}
+
+export class KoreaderRecommendParamsDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  bookId!: number;
+}
+
+export class KoreaderErrorReportDto {
+  @IsString()
+  @MaxLength(2000)
+  message!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  where?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  version?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  trace?: string;
 }

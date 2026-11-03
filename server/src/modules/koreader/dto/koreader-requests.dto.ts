@@ -93,3 +93,10 @@ export class KoreaderReplacementDto {
   @Matches(/^[a-zA-Z]{2,3}(?:-[a-zA-Z]{2})?$/)
   language!: string;
 }
+
+export class KoreaderRequestWatchDto {
+  // Up to 50 request ids, comma separated.
+  @IsString()
+  @Matches(/^\d{1,10}(,\d{1,10}){0,49}$/)
+  ids!: string;
+}

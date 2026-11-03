@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { AuditAction, AuditResource, Permission } from '@bookorbit/types';
 import { Auditable } from '../../common/decorators/auditable.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -14,11 +14,14 @@ import {
   KoreaderReleasePageDto,
   KoreaderGrabReleaseDto,
   KoreaderReplacementDto,
+  KoreaderRequestWatchDto,
 } from './dto/koreader-requests.dto';
+import { KoreaderEtagInterceptor } from './koreader-etag.interceptor';
 
 @Public()
 @UseGuards(KoreaderAuthGuard)
 @RequirePermission(Permission.BookRequestAccess)
+@UseInterceptors(KoreaderEtagInterceptor)
 @Controller('koreader/plugin/requests')
 export class KoreaderRequestsController {
   constructor(private readonly service: KoreaderRequestsService) {}
@@ -36,6 +39,11 @@ export class KoreaderRequestsController {
   @Get()
   list(@Query() query: KoreaderRequestPageDto, @CurrentUser() user: RequestUser) {
     return this.service.list(query.page, user, query.filter);
+  }
+
+  @Get('watch')
+  watch(@Query() query: KoreaderRequestWatchDto, @CurrentUser() user: RequestUser) {
+    return this.service.watch(query.ids.split(',').map(Number), user);
   }
 
   @Get(':id')

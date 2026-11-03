@@ -11,14 +11,20 @@ import { BookRequestService } from '../book-request/book-request.service';
 import { KoreaderCatalogService } from './koreader-catalog.service';
 import { KoreaderRequestsService } from './koreader-requests.service';
 import { KoreaderHubService } from './koreader-hub.service';
+import { DashboardWidgetService } from '../dashboard/dashboard-widget.service';
+import { KoreaderDiscoveryService } from './koreader-discovery.service';
+import { KoreaderSocialRepository } from './koreader-social.repository';
 import { KoreaderWishlistBookDto, KoreaderWishlistKeyDto, KoreaderCollectionBookDto } from './dto/koreader-hub.dto';
 
 describe('KOReader home, wishlist and collections', () => {
   const user = { id: 4, permissions: [Permission.BookRequestAccess], isSuperuser: false } as RequestUser;
   const catalog = { getDashboard: vi.fn(), getBooksPage: vi.fn(), getBookDetail: vi.fn() };
   const requests = { list: vi.fn() };
-  const collections = { findAll: vi.fn(), addBooks: vi.fn(), removeBooks: vi.fn() };
-  const preferences = { findByCategoryPrefix: vi.fn(), upsert: vi.fn(), delete: vi.fn() };
+  const collections = { findAll: vi.fn(), addBooks: vi.fn(), removeBooks: vi.fn(), create: vi.fn() };
+  const preferences = { findByCategoryPrefix: vi.fn(), findByCategory: vi.fn(), upsert: vi.fn(), delete: vi.fn() };
+  const widgets = { getReadingGoal: vi.fn(), getReadingStreak: vi.fn(), getReadingDays: vi.fn() };
+  const discovery = { series: vi.fn() };
+  const social = { sharers: vi.fn(), activity: vi.fn(), recommendations: vi.fn() };
   const external = { search: vi.fn() };
   const core = { checkAvailability: vi.fn() };
   const catalogGenres = { listGenres: vi.fn() };
@@ -36,6 +42,9 @@ describe('KOReader home, wishlist and collections', () => {
         { provide: KoreaderExternalCatalogService, useValue: external },
         { provide: BookRequestService, useValue: core },
         { provide: CatalogService, useValue: catalogGenres },
+        { provide: DashboardWidgetService, useValue: widgets },
+        { provide: KoreaderDiscoveryService, useValue: discovery },
+        { provide: KoreaderSocialRepository, useValue: social },
       ],
     }).compile();
     service = module.get(KoreaderHubService);
@@ -171,5 +180,98 @@ describe('KOReader home, wishlist and collections', () => {
     ).rejects.toThrow();
     await expect(pipe.transform({ key: '../preferences' }, { type: 'param', metatype: KoreaderWishlistKeyDto })).rejects.toThrow();
     await expect(pipe.transform({ bookId: 1, userId: 9 }, { type: 'body', metatype: KoreaderCollectionBookDto })).rejects.toThrow();
+  });
+  it('serves Home from the last recommendations and refreshes them in the background', async () => {
+    catalog.getBooksPage.mockResolvedValue({ items: [{ id: 3, title: 'Read', authors: ['Ann'], lastReadAt: '2026-01-01' }] });
+    external.search.mockResolvedValue({ items: [{ title: 'New', authors: ['Ann'], providerKey: 'openLibrary', providerId: 'OL1W' }] });
+    widgets.getReadingStreak.mockResolvedValue({ currentStreak: 3, longestStreak: 9, lastSevenDays: [] });
+    widgets.getReadingGoal.mockResolvedValue({ goalBooks: 24, completedBooks: 5, year: 2026 });
+    requests.list.mockImplementation((_page: number, _user: RequestUser, filter?: string) =>
+      Promise.resolve({
+        items:
+          filter === 'ready'
+            ? [
+                { id: 9, status: 'available', bookId: 44 },
+                { id: 10, status: 'available', bookId: null },
+              ]
+            : [],
+      }),
+    );
+    const first = await service.home(user);
+    const searches = external.search.mock.calls.length;
+    const second = await service.home(user);
+    expect(external.search.mock.calls.length).toBe(searches);
+    expect(second.recommendations).toEqual(first.recommendations);
+    expect(first.ready.map((r: { id: number }) => r.id)).toEqual([9]);
+    expect(first.streak).toEqual({ current: 3, longest: 9 });
+    expect(first.goal).toEqual({ goal: 24, done: 5, year: 2026 });
+  });
+  it('sums reading minutes for the Stats screen from the dashboard reading days', async () => {
+    widgets.getReadingGoal.mockResolvedValue({ goalBooks: null, completedBooks: 2, year: 2026 });
+    widgets.getReadingStreak.mockResolvedValue({ currentStreak: 1, longestStreak: 4, lastSevenDays: [true] });
+    widgets.getReadingDays.mockResolvedValue({ startDate: '2025-10-27', minutes: [...Array(369).fill(0), 10, 20] });
+    catalog.getBooksPage.mockResolvedValue({ items: [], total: 3 });
+    const stats = await service.stats(user);
+    expect(stats.minutes).toEqual({ today: 20, week: 30, month: 30, year: 30 });
+    expect(stats.readingDaysThisYear).toBe(2);
+    expect(stats.lastFourteenDays).toHaveLength(14);
+    expect(stats.finishedTotal).toBe(3);
+  });
+  it('suggests the next owned volume after a finished book', async () => {
+    catalog.getBookDetail.mockResolvedValue({
+      id: 5,
+      title: 'Book Two',
+      authors: ['Ann'],
+      seriesName: 'Saga',
+      seriesIndex: 2,
+      seriesMembers: [
+        { id: 4, title: 'Book One', seriesIndex: 1, readStatus: 'read' },
+        { id: 7, title: 'Book Four', seriesIndex: 4, readStatus: null },
+        { id: 6, title: 'Book Three', seriesIndex: 3, readStatus: null },
+      ],
+    });
+    const next = await service.next(user, 5);
+    expect(next.nextInSeries).toEqual(expect.objectContaining({ bookId: 6, title: 'Book Three' }));
+    expect(discovery.series).not.toHaveBeenCalled();
+  });
+  it('shows other readers only to a reader who shares, and only books the viewer can open', async () => {
+    preferences.findByCategory.mockResolvedValue(undefined);
+    expect(await service.socialFeed(user)).toEqual({ share: false, people: [], items: [] });
+    expect(social.sharers).not.toHaveBeenCalled();
+    preferences.findByCategory.mockResolvedValue({ data: { share: true } });
+    social.sharers.mockResolvedValue([{ userId: 8, name: 'Bea', username: 'bea' }]);
+    social.activity.mockResolvedValue([
+      { userId: 8, bookId: 1, status: 'read', updatedAt: new Date('2026-10-01'), finishedAt: new Date('2026-10-01') },
+      { userId: 8, bookId: 2, status: 'reading', updatedAt: new Date('2026-10-02'), finishedAt: null },
+    ]);
+    social.recommendations.mockResolvedValue([{ userId: 8, bookId: 3, note: 'Loved it', at: '2026-10-03T00:00:00.000Z' }]);
+    catalog.getBooksPage.mockResolvedValue({
+      items: [
+        { id: 1, title: 'Visible' },
+        { id: 3, title: 'Also visible' },
+      ],
+    });
+    const feed = await service.socialFeed(user);
+    expect(social.sharers).toHaveBeenCalledWith(4);
+    expect(feed.items.map((i: { id: number; kind: string }) => [i.id, i.kind])).toEqual([
+      [3, 'recommended'],
+      [1, 'finished'],
+    ]);
+    expect(feed.items[0]).toEqual(expect.objectContaining({ friend: 'Bea', note: 'Loved it' }));
+  });
+  it('refuses a recommendation until the reader shares', async () => {
+    catalog.getBookDetail.mockResolvedValue({ id: 3 });
+    preferences.findByCategory.mockResolvedValue(undefined);
+    await expect(service.recommend(user, 3)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(preferences.upsert).not.toHaveBeenCalled();
+  });
+  it('rate limits plugin error reports per reader', () => {
+    const results = Array.from({ length: 32 }, () => service.reportError(user, { message: 'boom' }).accepted);
+    expect(results.filter(Boolean)).toHaveLength(30);
+  });
+  it('creates a Kobo collection with the default folder icon', async () => {
+    collections.create.mockResolvedValue({ id: 12, name: 'Beach reads' });
+    expect(await service.createCollection(user, '  Beach reads ')).toEqual({ id: 12, name: 'Beach reads', bookCount: 0 });
+    expect(collections.create).toHaveBeenCalledWith({ name: 'Beach reads', icon: 'FolderOpen' }, user);
   });
 });

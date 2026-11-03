@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import { KoreaderEtagInterceptor } from './koreader-etag.interceptor';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../common/types/request-user';
@@ -8,17 +9,19 @@ import {
   RouletteAcquireDto,
   RouletteDecisionDto,
   RouletteQueryDto,
+  RouletteQueueDto,
   RouletteResetDto,
   RouletteTasteDto,
   RouletteUndoDto,
 } from './dto/koreader-roulette.dto';
 @Public()
 @UseGuards(KoreaderAuthGuard)
+@UseInterceptors(KoreaderEtagInterceptor)
 @Controller('koreader/plugin/roulette')
 export class KoreaderRouletteController {
   constructor(private readonly service: KoreaderRouletteService) {}
-  @Get() queue(@CurrentUser() user: RequestUser) {
-    return this.service.queue(user);
+  @Get() queue(@CurrentUser() user: RequestUser, @Query() query: RouletteQueueDto) {
+    return this.service.queue(user, query);
   }
   @Get('matches') matches(@CurrentUser() user: RequestUser, @Query() query: RouletteQueryDto) {
     return this.service.matches(user, query);

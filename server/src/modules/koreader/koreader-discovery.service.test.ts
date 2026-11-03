@@ -8,6 +8,7 @@ import { KoreaderRequestsService } from './koreader-requests.service';
 import { KoreaderCatalogService } from './koreader-catalog.service';
 import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
 import { KoreaderDiscoveryService, dedupeDiscovery } from './koreader-discovery.service';
+import { KoreaderCoverCacheService } from './koreader-cover-cache.service';
 import { KoreaderBulkRequestsDto, KoreaderWorkParamsDto } from './dto/koreader-discovery.dto';
 const user = makeUser({ id: 7, permissions: [Permission.KoreaderSync, Permission.BookRequestAccess] });
 const book = { title: 'A Christmas Carol', authors: ['Charles Dickens'], providerKey: 'openLibrary', providerId: 'OL1W' };
@@ -28,6 +29,7 @@ describe('device discovery', () => {
         { provide: KoreaderRequestsService, useValue: requests },
         { provide: KoreaderExternalCatalogService, useValue: external },
         { provide: BookRequestService, useValue: core },
+        { provide: KoreaderCoverCacheService, useValue: { get: (_key: string, fetch: () => Promise<Buffer>) => fetch() } },
       ],
     }).compile();
     service = module.get(KoreaderDiscoveryService);

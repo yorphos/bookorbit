@@ -1,3 +1,4 @@
+import { KoreaderCoverCacheService } from './koreader-cover-cache.service';
 import { KoreaderExternalCatalogService } from './koreader-external-catalog.service';
 import { BookRequestService } from '../book-request/book-request.service';
 import { KoreaderCatalogBooksQueryDto } from './dto/koreader-catalog-query.dto';
@@ -77,6 +78,7 @@ export class KoreaderDiscoveryService {
     private readonly permissions: PermissionService,
     private readonly external: KoreaderExternalCatalogService,
     private readonly bookRequests: BookRequestService,
+    private readonly covers: KoreaderCoverCacheService,
   ) {}
 
   requireAccess(user: RequestUser) {
@@ -186,12 +188,12 @@ export class KoreaderDiscoveryService {
   }
   async cover(id: string, user: RequestUser) {
     this.requireAccess(user);
-    return this.external.cover(id);
+    return this.covers.get('work:' + id, () => this.external.cover(id));
   }
 
   async coverUrl(address: string, user: RequestUser) {
     this.requireAccess(user);
-    return this.external.coverUrl(address);
+    return this.covers.get(address, () => this.external.coverUrl(address));
   }
 
   async series(query: KoreaderBrowseQueryDto, user: RequestUser) {

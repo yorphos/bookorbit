@@ -18,6 +18,7 @@ describe('Roulette isolation, explicit acquisition and availability', () => {
       records: vi.fn().mockResolvedValue([]),
       get: vi.fn().mockResolvedValue(undefined),
       excluded: vi.fn().mockResolvedValue(new Set()),
+      decided: vi.fn().mockResolvedValue(new Set()),
       decide: vi.fn().mockResolvedValue({ eventId: 'test' }),
       undo: vi.fn(),
       matches: vi.fn(),
@@ -54,6 +55,34 @@ describe('Roulette isolation, explicit acquisition and availability', () => {
     expect(external.synopsis).toHaveBeenCalledTimes(1);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].description).toBe('A public-domain story');
+  });
+  it('keeps the ranked deck between calls and drops cards decided since', async () => {
+    external.search.mockResolvedValue({ items: ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'].map(book) });
+    const first = await service.queue(user);
+    expect(first.items.map((b) => b.title)).toEqual(['One']);
+    repo.decided.mockResolvedValue(new Set([rouletteKey(book('One'))]));
+    const second = await service.queue(user);
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0].title).not.toBe('One');
+    // Ranked once: the second card came from the kept deck, not new catalog searches.
+    expect(core.checkAvailability).toHaveBeenCalledTimes(1);
+  });
+  it('sends an offline deck of several cards, with synopses for the first few', async () => {
+    external.search.mockResolvedValue({ items: Array.from({ length: 25 }, (_, i) => ({ ...book('Card ' + i), providerId: 'OL' + i + 'W' })) });
+    const result = await service.queue(user, { count: 20 });
+    expect(result.items).toHaveLength(20);
+    expect(external.synopsis).toHaveBeenCalledTimes(8);
+    expect(result.items.every((item) => /^[a-f0-9]{32}$/.test(item.rouletteKey))).toBe(true);
+  });
+  it('ranks a "more like this" deck around the seed book and never offers the seed itself', async () => {
+    catalog.getBookDetail.mockResolvedValue({ title: 'Seed', authors: ['Seed Author'], genres: ['Sea stories'] });
+    external.search.mockResolvedValue({ items: ['Seed', 'Ocean'].map((title) => ({ ...book(title), authors: ['Seed Author'] })) });
+    const result = await service.queue(user, { seedBookId: 12 });
+    expect(external.search).toHaveBeenCalledWith('Seed Author', 'author', 1, undefined, 'popular', { language: 'en' });
+    expect(external.search).toHaveBeenCalledWith('Sea stories', 'subject', 1, undefined, 'popular', { language: 'en' });
+    expect(hub.discoveryCandidates).not.toHaveBeenCalled();
+    expect(result.items.map((b) => b.title)).toEqual(['Ocean']);
+    expect(result.seed).toBe('Seed');
   });
   it('Match only saves user feedback and never starts acquisition', async () => {
     await service.decide(user, { eventId: 'test', decision: 'match', book: book('Frankenstein') });

@@ -162,6 +162,14 @@ export class KoreaderRequestsService {
     return this.project(request, user);
   }
 
+  /** The current state of requests a device follows. Ids it may no longer see come back as gone. */
+  async watch(ids: number[], user: RequestUser) {
+    this.requireAccess(user);
+    const unique = [...new Set(ids)].slice(0, 50);
+    const items = await Promise.all(unique.map((id) => this.get(id, user).catch(() => ({ id, gone: true as const }))));
+    return { items };
+  }
+
   async cancel(id: number, user: RequestUser) {
     await this.get(id, user);
     return this.project(await this.requests.cancel(id, user), user);

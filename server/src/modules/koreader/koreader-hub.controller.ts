@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import { KoreaderEtagInterceptor } from './koreader-etag.interceptor';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import type { RequestUser } from '../../common/types/request-user';
@@ -6,6 +7,12 @@ import { KoreaderAuthGuard } from './koreader-auth.guard';
 import { KoreaderHubService } from './koreader-hub.service';
 import {
   KoreaderCollectionBookDto,
+  KoreaderCreateCollectionDto,
+  KoreaderErrorReportDto,
+  KoreaderNextQueryDto,
+  KoreaderRecommendDto,
+  KoreaderRecommendParamsDto,
+  KoreaderSocialSharingDto,
   KoreaderCollectionQueryDto,
   KoreaderHubPageDto,
   KoreaderWishlistBookDto,
@@ -14,6 +21,7 @@ import {
 
 @Public()
 @UseGuards(KoreaderAuthGuard)
+@UseInterceptors(KoreaderEtagInterceptor)
 @Controller('koreader/plugin/hub')
 export class KoreaderHubController {
   constructor(private readonly hub: KoreaderHubService) {}
@@ -31,6 +39,47 @@ export class KoreaderHubController {
   @Get('genres')
   genres(@CurrentUser() user: RequestUser) {
     return this.hub.genres(user);
+  }
+
+  @Get('stats')
+  stats(@CurrentUser() user: RequestUser) {
+    return this.hub.stats(user);
+  }
+
+  @Get('next')
+  next(@CurrentUser() user: RequestUser, @Query() query: KoreaderNextQueryDto) {
+    return this.hub.next(user, query.bookId);
+  }
+
+  @Get('social')
+  social(@CurrentUser() user: RequestUser) {
+    return this.hub.socialFeed(user);
+  }
+
+  @Post('social/sharing')
+  sharing(@CurrentUser() user: RequestUser, @Body() body: KoreaderSocialSharingDto) {
+    return this.hub.setSocialSharing(user, body.share);
+  }
+
+  @Post('social/recommendations')
+  recommend(@CurrentUser() user: RequestUser, @Body() body: KoreaderRecommendDto) {
+    return this.hub.recommend(user, body.bookId, body.note);
+  }
+
+  @Delete('social/recommendations/:bookId')
+  unrecommend(@CurrentUser() user: RequestUser, @Param() params: KoreaderRecommendParamsDto) {
+    return this.hub.unrecommend(user, params.bookId);
+  }
+
+  @Post('error-reports')
+  @HttpCode(202)
+  reportError(@CurrentUser() user: RequestUser, @Body() body: KoreaderErrorReportDto) {
+    return this.hub.reportError(user, body);
+  }
+
+  @Post('collections')
+  createCollection(@CurrentUser() user: RequestUser, @Body() body: KoreaderCreateCollectionDto) {
+    return this.hub.createCollection(user, body.name);
   }
 
   @Get('collections')

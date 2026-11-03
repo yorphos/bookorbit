@@ -7,6 +7,9 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsInt,
+  Max,
+  Min,
   Matches,
   ArrayMinSize,
   MaxLength,
@@ -40,4 +43,13 @@ export class RouletteAcquireDto {
 }
 export class RouletteResetDto {
   @IsIn(['RESET']) confirmation!: 'RESET';
+}
+export class RouletteQueueDto {
+  // How many cards to send: 1 for the live card, up to 20 for an offline deck.
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(20) count = 1;
+  // "More like this": a library book, or a catalog book named by title and author.
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) seedBookId?: number;
+  @IsOptional() @IsString() @MaxLength(500) seedTitle?: string;
+  @IsOptional() @IsString() @MaxLength(255) seedAuthor?: string;
+  @IsOptional() @IsString() @MaxLength(120) seedGenre?: string;
 }
