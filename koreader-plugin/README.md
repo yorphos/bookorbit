@@ -95,3 +95,7 @@ New bookmarks retain their source file. Mapping into a structurally different si
 ### EPUB delivery defaults
 
 With plugin 1.7.0 and a supported server, set the default in BookOrbit web Settings > KOReader > Sync Settings > KOReader EPUB delivery. Devices can override the credential default. In KOReader, BookOrbit > Download > Settings > Read-aloud EPUB delivery edits the same server device setting. The single-download dialog offers Use BookOrbit default and an override to the other EPUB variant. Existing local preferences are imported once when the server has no configured default, and interrupted transfers keep their captured variant.
+
+## Layout checks (fork)
+
+`spec/bookorbit_hub_render.lua` draws every hub screen with the real KOReader widgets and fonts. With `BOOKORBIT_GOLDEN_DIR=koreader-plugin/spec/render-golden` it compares each screen with its saved outline (a 1/16 scale greyscale grid) at the current `BOOKORBIT_UI_SCALE`, and fails with the area that moved when more than 1% of the grid changed. After an intended layout change, run it again with `BOOKORBIT_GOLDEN_UPDATE=1` for both scales (1.05 and 1.2) and commit the new outlines. Run it from the KOReader runtime directory with an empty `BOOKORBIT_PREVIEW_DIR`, so covers draw as placeholders.

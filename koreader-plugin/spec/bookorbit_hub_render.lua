@@ -2,6 +2,8 @@
 -- directory. These are native widgets and fonts, not an HTML approximation.
 -- BOOKORBIT_PLUGIN_DIR points to bookorbit.koplugin; BOOKORBIT_PREVIEW_DIR
 -- holds optional Gutenberg cover-{98,11,84,1661}.jpg and receives the PNGs.
+-- BOOKORBIT_GOLDEN_DIR: compare each screen with its saved outline there and
+-- fail when the layout moved; BOOKORBIT_GOLDEN_UPDATE=1 saves new outlines.
 require("setupkoenv")
 G_defaults = require("luadefaults"):open()
 G_reader_settings = require("luasettings"):open(os.getenv("KO_HOME") .. "/settings.reader.lua")
@@ -19,6 +21,60 @@ local Model = require("bookorbit_hub_model")
 local BB = require("ffi/blitbuffer")
 local framebuffer = BB.new(1072, 1448, BB.TYPE_BB8)
 local dir = os.getenv("BOOKORBIT_PREVIEW_DIR")
+local golden_dir, golden_update = os.getenv("BOOKORBIT_GOLDEN_DIR"), os.getenv("BOOKORBIT_GOLDEN_UPDATE") == "1"
+local scale_name = tostring(tonumber(os.getenv("BOOKORBIT_UI_SCALE")) or 1.05)
+-- The screen at 1/16 size: one average grey per 16 x 16 block. Coarse enough to
+-- ignore anti-aliasing, fine enough to catch a moved, missing or clipped block.
+local BLOCK = 16
+local function outline(bb)
+    local rows = {}
+    for by = 0, math.floor(bb:getHeight() / BLOCK) - 1 do
+        local cells = {}
+        for bx = 0, math.floor(bb:getWidth() / BLOCK) - 1 do
+            local sum = 0
+            for y = by * BLOCK, by * BLOCK + BLOCK - 1, 2 do
+                for x = bx * BLOCK, bx * BLOCK + BLOCK - 1, 2 do
+                    sum = sum + bb:getPixel(x, y):getColor8().a
+                end
+            end
+            cells[#cells + 1] = string.format("%02x", math.floor(sum / (BLOCK * BLOCK / 4)))
+        end
+        rows[#rows + 1] = table.concat(cells)
+    end
+    return rows
+end
+local function checkGolden(name, bb)
+    if not golden_dir then return end
+    local path = golden_dir .. "/" .. name .. "@" .. scale_name .. ".txt"
+    local now = outline(bb)
+    local f = io.open(path, "r")
+    if golden_update or not f then
+        if f then f:close() end
+        assert(golden_update, "No saved outline for " .. name .. "; run with BOOKORBIT_GOLDEN_UPDATE=1")
+        local out = assert(io.open(path, "w")); out:write(table.concat(now, "\n"), "\n"); out:close()
+        return
+    end
+    local saved = {}
+    for line in f:lines() do saved[#saved + 1] = line end
+    f:close()
+    local differing, total, x0, y0, x1, y1 = 0, 0
+    for row, line in ipairs(now) do
+        local old = saved[row] or ""
+        for col = 1, #line / 2 do
+            total = total + 1
+            local a = tonumber(line:sub(col * 2 - 1, col * 2), 16)
+            local b = tonumber(old:sub(col * 2 - 1, col * 2), 16) or -255
+            if math.abs(a - b) > 24 then
+                differing = differing + 1
+                x0, y0 = math.min(x0 or col, col), math.min(y0 or row, row)
+                x1, y1 = math.max(x1 or col, col), math.max(y1 or row, row)
+            end
+        end
+    end
+    if differing <= total * 0.01 then return end
+    error(string.format("%s moved: %d of %d blocks differ, around x %d-%d, y %d-%d px. Check %s.png; if intended, run with BOOKORBIT_GOLDEN_UPDATE=1",
+        name, differing, total, (x0 - 1) * BLOCK, x1 * BLOCK, (y0 - 1) * BLOCK, y1 * BLOCK, name), 0)
+end
 local function book(title, author, cover, extra)
     local b = {title = title, authors = {author}, coverPath = dir .. "/cover-" .. cover .. ".jpg", language = "en", formats = {"EPUB"}}
     for k, v in pairs(extra or {}) do b[k] = v end
@@ -50,7 +106,25 @@ screens.roulette=state("roulette","discover",{onboarded=true})
 screens.roulette.book=book("Frankenstein; or, The Modern Prometheus","Mary Shelley",84,{genres={"Gothic","Horror"},description="A scientist creates life and abandons his lonely creature. Mary Shelley's novel follows the consequences of ambition and the creature's search for companionship.",recommendationWhy="Shares Gothic and Horror with a book you liked."})
 screens.matches=state("matches","discover");screens.matches.title="Matches";screens.matches.visible={frank,sherlock,tale};screens.matches.selectedCount=2
 screens.home.canResume=true
-for name, s in pairs(screens) do
+screens.home.homeStats = "3-day reading streak · 5 of 24 books in 2026"
+screens.home.ready = {tale, sherlock}
+screens.stats = state("stats", "books", {goal={goal=24,done=5,year=2026}, streak={current=3,longest=9}, minutes={today=20,week=140,month=600,year=5000}, lastFourteenDays={0,10,20,30,0,40,50,60,0,70,80,90,0,20}, readingDaysThisYear=120, finishedTotal=40, readingNow=2})
+screens.stats.finished = {tale, alice, frank}
+screens.social = state("social", "discover", {share = true, people = {"Bea", "Sam"}})
+screens.social.title = "Friends"
+screens.social.visible = {book("A Tale of Two Cities", "Charles Dickens", 98, {bookId = 30, hint = "Bea recommends: Loved it"}), book("Frankenstein", "Mary Shelley", 84, {bookId = 31, hint = "Sam finished"})}
+screens.social_off = state("social", "discover", {share = false})
+screens.social_off.title = "Friends"; screens.social_off.visible = {}
+screens.hub_settings = state("hub_settings", "home"); screens.hub_settings.settings = {}
+screens.diagnostics = state("diagnostics", "home")
+screens.diagnostics.diag = {version = "2.2.0+yrp.2", user = "reader", connected = true, cache = {files = 12, bytes = 81920, dirty = 1, memory = 5}, covers = 140, coverBytes = 4200000,
+    outbox = {"Wishlist: Walden · 3 min ago"}, watched = {"Frankenstein · Downloading · changed 2 min ago"}, timings = {"Background process: 12 requests, average 0.41 s, last 0.30 s"},
+    events = {"just now · Sent: match: Frankenstein", "1 h ago · Error: GET /koreader/plugin/hub/home: network_error"}, upkeep = "2 h ago · Downloaded 1 book"}
+local names = {}
+for name in pairs(screens) do names[#names + 1] = name end
+table.sort(names)
+for _, name in ipairs(names) do
+    local s = screens[name]
     if name == "search" or name == "books" or name == "discover" then
         local time_machine = {title="The Time Machine", authors={"H. G. Wells"}, language="en", formats={"EPUB"}}
         local rows = require("bookorbit_hub_theme").geometry(1072,1448).rows
@@ -60,9 +134,11 @@ for name, s in pairs(screens) do
     local page = Page:new{build = function(_, w, h) return View.build(s, w, h) end}
     page:paintTo(framebuffer, 0, 0)
     framebuffer:writePNG(dir .. "/" .. name .. ".png")
+    checkGolden(name, framebuffer)
     local count = 0
     for _, hit in ipairs(page.hits) do
-        if hit.action and hit.action.kind == "tab" and hit.dimen.y > 1200 then
+        -- Footer tabs are a quarter of the screen wide; "See all" links also open tabs.
+        if hit.action and hit.action.kind == "tab" and hit.dimen.w == math.floor(1072 / 4) and hit.dimen.y >= s.bodyBounds.y + s.bodyBounds.h then
             assert(hit.dimen.x >= 0 and hit.dimen.x + hit.dimen.w <= 1072)
             assert(hit.dimen.h >= 70, "Navigation target too small")
             count = count + 1

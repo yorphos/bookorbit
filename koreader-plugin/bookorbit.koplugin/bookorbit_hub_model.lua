@@ -270,4 +270,141 @@ function M.seriesActions(body)
     }
 end
 
+-- Reader-facing options on the Hub options screen. The first value of each is
+-- its default.
+M.OPTIONS = {
+    {
+        key = "hub_charging_downloads",
+        label = "Download ready books while charging",
+        values = { { true, "On" }, { false, "Off" } },
+    },
+    {
+        key = "hub_charging_series",
+        label = "Also download the next book in series you are reading",
+        values = { { false, "Off" }, { true, "On" } },
+    },
+    {
+        key = "hub_cleanup_days",
+        label = "Remove finished downloads",
+        values = {
+            { 0, "Never" },
+            { 14, "14 days after finishing" },
+            { 30, "30 days after finishing" },
+            { 60, "60 days after finishing" },
+            { 90, "90 days after finishing" },
+        },
+    },
+    {
+        key = "hub_end_of_book",
+        label = "Suggestions when you finish a book",
+        values = { { true, "On" }, { false, "Off" } },
+    },
+    {
+        key = "hub_flash_every",
+        label = "Full refresh to clear ghosting",
+        values = {
+            { 8, "Every 8 screens" },
+            { 4, "Every 4 screens" },
+            { 16, "Every 16 screens" },
+            { 0, "Never, and no flash when a message closes" },
+        },
+    },
+    {
+        key = "hub_error_reports",
+        label = "Send error reports to the BookOrbit server log",
+        values = { { false, "Off" }, { true, "On" } },
+    },
+    {
+        key = "hub_direct_requests",
+        label = "Quick status checks without a background process",
+        values = { { false, "Off" }, { true, "On" } },
+    },
+}
+
+function M.option(key)
+    for _, option in ipairs(M.OPTIONS) do
+        if option.key == key then
+            return option
+        end
+    end
+end
+
+-- The option's value in settings, or its default.
+function M.setting(settings, key)
+    local option = M.option(key)
+    local value = settings and settings[key]
+    if value == nil and option then
+        return option.values[1][1]
+    end
+    return value
+end
+
+-- The label of the option's current value.
+function M.settingLabel(settings, key)
+    local option, value = M.option(key), M.setting(settings, key)
+    for _, v in ipairs(option and option.values or {}) do
+        if v[1] == value then
+            return v[2]
+        end
+    end
+    return tostring(value)
+end
+
+-- The next value when the option is tapped.
+function M.nextSetting(settings, key)
+    local option, value = M.option(key), M.setting(settings, key)
+    if not option then
+        return value
+    end
+    for i, v in ipairs(option.values) do
+        if v[1] == value then
+            return option.values[i % #option.values + 1][1]
+        end
+    end
+    return option.values[1][1]
+end
+
+-- One line for Home: the reading streak and the year's goal.
+function M.homeStats(body)
+    local parts = {}
+    local streak = type(body) == "table" and body.streak
+    if type(streak) == "table" and (tonumber(streak.current) or 0) > 0 then
+        parts[#parts + 1] = tostring(streak.current) .. "-day reading streak"
+    end
+    local goal = type(body) == "table" and body.goal
+    if type(goal) == "table" and tonumber(goal.goal) then
+        parts[#parts + 1] = tostring(goal.done or 0)
+            .. " of "
+            .. tostring(goal.goal)
+            .. " books in "
+            .. tostring(goal.year)
+    elseif type(goal) == "table" and (tonumber(goal.done) or 0) > 0 then
+        parts[#parts + 1] = tostring(goal.done) .. " books finished in " .. tostring(goal.year)
+    end
+    return #parts > 0 and table.concat(parts, " · ") or nil
+end
+
+-- Reading time in words: "45 min", "3 h 5 min".
+function M.minutes(value)
+    value = math.floor((tonumber(value) or 0) + 0.5)
+    if value < 60 then
+        return value .. " min"
+    end
+    local hours, rest = math.floor(value / 60), value % 60
+    return hours .. " h" .. (rest > 0 and (" " .. rest .. " min") or "")
+end
+
+-- How long ago a timestamp was, briefly.
+function M.ago(t, now)
+    local seconds = math.max(0, (now or os.time()) - (tonumber(t) or 0))
+    if seconds < 90 then
+        return "just now"
+    elseif seconds < 3600 then
+        return math.floor(seconds / 60) .. " min ago"
+    elseif seconds < 86400 then
+        return math.floor(seconds / 3600) .. " h ago"
+    end
+    return math.floor(seconds / 86400) .. " days ago"
+end
+
 return M

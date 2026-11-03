@@ -51,7 +51,7 @@ local BookOrbitSidecar = require("bookorbit_sidecar")
 local BookOrbitSweep = require("bookorbit_sweep")
 local BookOrbitUpdater = require("bookorbit_updater")
 
-local PLUGIN_VERSION = "2.2.0+yrp.1"
+local PLUGIN_VERSION = "2.2.0+yrp.2"
 
 local SYNC_STRATEGY = {
     PROMPT = 1,
@@ -1027,8 +1027,52 @@ function BookOrbit:onReaderReady()
     end
     BookOrbitNoteStamp.install(self.ui)
     self:registerEvents()
+    self:addFindInBookOrbit()
 
     self.last_page = self.ui:getCurrentPage()
+end
+
+-- "Find in BookOrbit" in the menu of selected text: a title or author met in
+-- a book becomes a BookOrbit search.
+function BookOrbit:addFindInBookOrbit()
+    local highlight = self.ui and self.ui.highlight
+    if not highlight or not highlight.addToHighlightDialog then return end
+    highlight:addToHighlightDialog("13_bookorbit_find", function(this)
+        return {
+            text = _("Find in BookOrbit"),
+            enabled = self:isLoggedIn(),
+            callback = function()
+                local selected = this.selected_text and this.selected_text.text or ""
+                local q = selected:gsub("%s+", " "):match("^%s*(.-)%s*$"):sub(1, 200)
+                this:onClose()
+                if #q < 2 then return end
+                require("bookorbit_hub").open(self, false, { kind = "search", q = q, field = "all", scope = "all", page = 1 })
+            end,
+        }
+    end)
+end
+
+-- The last page: BookOrbit's own end-of-book screen, when that option is on.
+function BookOrbit:onEndOfBook()
+    if not self.in_reader or not self:isLoggedIn() then return end
+    if require("bookorbit_hub_model").setting(self.settings, "hub_end_of_book") == false then return end
+    -- After KOReader's own menu is up, so it can be replaced.
+    UIManager:scheduleIn(0.2, function()
+        if self.ui and self.ui.document then
+            require("bookorbit_hub_end").open(self)
+        end
+    end)
+end
+
+-- Charging: a chance to download ready books with the Wi-Fi already on.
+function BookOrbit:onCharging()
+    if self:isLoggedIn() then
+        require("bookorbit_hub_upkeep").soon(self, 60)
+    end
+end
+
+function BookOrbit:onNotCharging()
+    require("bookorbit_hub_upkeep").stop()
 end
 
 local function titleFromFile(file)

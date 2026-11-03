@@ -228,7 +228,8 @@ function CatalogThumbnails:thumbnailState(book)
 end
 
 function CatalogThumbnails:invalidateThumbnail(book, exists)
-    if not book or book.id == nil then return end
+    -- Hub covers of catalog books have a cover key but no library id.
+    if not book or (book.id == nil and not book.hub_cover_key) then return end
     local entry = self.thumbnail_memo[memoKey(book)]
     if entry then entry.exists = exists == true end
 end

@@ -257,7 +257,9 @@ end
 
 -- Returns decoded_body on success, or nil, err_code, decoded_error_body.
 -- err_code is a number for HTTP errors and a string for transport errors.
-function BookOrbitApi:requestBlocking(method, path, body, extra_headers)
+-- meta (optional): meta.timeout = { block, total } overrides the timeouts, and
+-- the reply's ETag is written to meta.etag.
+function BookOrbitApi:requestBlocking(method, path, body, extra_headers, meta)
     local initial_url = self.server_url .. path
     local request = {
         url = initial_url,
@@ -294,13 +296,18 @@ function BookOrbitApi:requestBlocking(method, path, body, extra_headers)
         request.sink = ltn12.sink.table(sink)
         request.proxy = self:getProxy(current_url)
 
-        socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+        local timeout = meta and meta.timeout
+        socketutil:set_timeout(timeout and timeout[1] or socketutil.LARGE_BLOCK_TIMEOUT, timeout and timeout[2] or socketutil.LARGE_TOTAL_TIMEOUT)
         local code, headers, status = socket.skip(1, sendHttpRequest(request))
         socketutil:reset_timeout()
 
         if type(code) ~= "number" then
             logger.dbg("BookOrbit: network error:", status or code)
             return nil, tostring(status or code or "network_error")
+        end
+        if meta then
+            meta.code = code
+            meta.etag = headers and (headers.etag or headers.ETag) or nil
         end
 
         if not request.source and (method == "GET" or method == "HEAD")

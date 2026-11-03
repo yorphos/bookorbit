@@ -115,7 +115,12 @@ function Pill:close()
     self.closed = true
     if self.timer then UIManager:unschedule(self.timer) end
     if current == self then current = nil end
-    UIManager:close(self, "ui", self.dimen)
+    -- A black pill leaves a grey silhouette under a plain partial refresh on
+    -- e-ink. A flash of just its rectangle clears it, unless the reader turned
+    -- ghost-clearing flashes off.
+    local settings = G_reader_settings and G_reader_settings:readSetting("bookorbit")
+    local flashes = not (type(settings) == "table" and settings.hub_flash_every == 0)
+    UIManager:close(self, flashes and "flashui" or "ui", self.dimen)
 end
 
 function Pill:onCloseWidget()

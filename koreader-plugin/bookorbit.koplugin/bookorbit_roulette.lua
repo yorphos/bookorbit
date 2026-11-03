@@ -6,27 +6,11 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local TextViewer = require("ui/widget/textviewer")
 local Toast = require("bookorbit_toast")
 local Model = require("bookorbit_hub_model")
+local Outbox = require("bookorbit_hub_outbox")
+local NetworkMgr = require("ui/network/manager")
 
 local R = {}
 local ROOT = "/koreader/plugin/roulette"
-
-local function uuid()
-    local f = assert(io.open("/dev/urandom", "rb"))
-    local bytes = f:read(16)
-    f:close()
-    local hex = bytes:gsub(".", function(c)
-        return string.format("%02x", c:byte())
-    end)
-    return hex:sub(1, 8)
-        .. "-"
-        .. hex:sub(9, 12)
-        .. "-4"
-        .. hex:sub(14, 16)
-        .. "-8"
-        .. hex:sub(18, 20)
-        .. "-"
-        .. hex:sub(21, 32)
-end
 
 -- Keeps at most `limit` UTF-8 characters.
 local function clip(value, limit)
@@ -71,78 +55,155 @@ local confirmations = {
     skip = "Skipped without changing your taste profile.",
 }
 
--- Sends the saved decision. Its event id makes a retry idempotent, so a decision
--- whose reply was lost is never recorded twice.
-local function send(hub, pending)
-    local settings = hub.plugin.settings
-    hub:fetch("POST", ROOT .. "/decision", pending.payload, function(result)
-        settings.roulette_pending = nil
-        settings.roulette_last_event = not result.undone and { account = hub.account, id = result.eventId } or nil
-        flush()
-        Toast.show(
-            result.undone and "This decision was already undone on another device."
-                or confirmations[pending.payload.decision]
-        )
-        if hub.route.kind == "detail" then
-            hub:navigate({ kind = "matches" }, true)
+-- Cards decided on this Kobo, by their Roulette key, with the decision's event
+-- id. Kept so a saved deck never shows a decided card again, even offline.
+local MAX_DECIDED = 300
+local function decidedStore(hub)
+    local saved = hub.plugin.settings.hub_roulette_decided
+    if type(saved) ~= "table" or saved.account ~= hub.account then
+        saved = { account = hub.account, keys = {}, order = {} }
+        hub.plugin.settings.hub_roulette_decided = saved
+    end
+    return saved
+end
+
+function R.decided(hub)
+    return decidedStore(hub).keys
+end
+
+local function mark(hub, key, event_id)
+    if not key then
+        return
+    end
+    local saved = decidedStore(hub)
+    if not saved.keys[key] then
+        saved.order[#saved.order + 1] = key
+    end
+    saved.keys[key] = event_id
+    while #saved.order > MAX_DECIDED do
+        saved.keys[table.remove(saved.order, 1)] = nil
+    end
+end
+
+local function unmark(hub, key)
+    local saved = decidedStore(hub)
+    saved.keys[key] = nil
+    for i = #saved.order, 1, -1 do
+        if saved.order[i] == key then
+            table.remove(saved.order, i)
+        end
+    end
+end
+
+local function unmarkEvent(hub, event_id)
+    for key, id in pairs(decidedStore(hub).keys) do
+        if id == event_id then
+            unmark(hub, key)
+        end
+    end
+end
+
+-- Asks for more cards once the deck runs low, merged behind the ones left.
+function R.refill(hub, force)
+    if hub.route.kind ~= "roulette" or hub.busy or not NetworkMgr:isConnected() then
+        return
+    end
+    local decided, left = R.decided(hub), 0
+    for _, item in ipairs((hub.state.body or {}).items or {}) do
+        if not decided[item.rouletteKey or ""] then
+            left = left + 1
+        end
+    end
+    if left >= hub.ROULETTE_REFILL_BELOW and not force then
+        return
+    end
+    local route, path = hub.route, hub:path(hub.route)
+    hub:quietRequest("GET", path, nil, function(body)
+        if hub.route ~= route then
+            return
+        end
+        local merged, seen = {}, {}
+        for _, list in ipairs({ (hub.state.body or {}).items or {}, body.items or {} }) do
+            for _, item in ipairs(list) do
+                local key = item.rouletteKey
+                if key and not seen[key] and not decided[key] then
+                    seen[key] = true
+                    merged[#merged + 1] = item
+                end
+            end
+        end
+        local had_card = hub.state.book ~= nil
+        body.items = merged
+        hub.state.body = body
+        require("bookorbit_list_cache").stage(hub.account .. "|hub|" .. path, body)
+        if not had_card or force then
+            hub:refreshView()
         else
-            hub:load()
+            -- New cards only need their covers; the card on screen is unchanged.
+            hub:present()
+            hub.page:rebuild()
+        end
+        if force then
+            Toast.show(#merged .. " cards saved on this Kobo. Their covers download in the background.")
+        end
+    end, function()
+        if force then
+            Toast.error("Could not reach BookOrbit for more cards.")
         end
     end)
 end
 
+-- Records a decision and moves to the next card at once. The decision is sent
+-- in the background, now or when BookOrbit can be reached; its event id makes
+-- a resend harmless.
 function R.decide(hub, decision, book)
-    if hub.busy then
-        Toast.show("Please wait for the current action to finish.")
-        return
-    end
     if not book or not book.title then
         return
     end
-    local settings = hub.plugin.settings
-    local pending = settings.roulette_pending
-    if pending and pending.account ~= hub.account then
-        pending = nil
+    local event_id = Outbox.uuid()
+    Outbox.add(hub, {
+        method = "POST",
+        path = ROOT .. "/decision",
+        payload = {
+            eventId = event_id,
+            decision = decision,
+            book = R.book(book),
+            key = decision == "remove" and book.matchKey or nil,
+        },
+        label = decision .. ": " .. tostring(book.title),
+        kind = "roulette",
+        card = book.rouletteKey,
+    })
+    if decision ~= "remove" then
+        mark(hub, book.rouletteKey, event_id)
     end
-    local same = pending and pending.payload.book.title == book.title and pending.payload.decision == decision
-    if pending and not same then
-        -- An earlier decision never got a reply. Let the reader retry it or let it go.
-        local previous = pending.payload
-        hub:menu("Unconfirmed decision: " .. tostring(previous.decision) .. " · " .. tostring(previous.book.title), {
-            {
-                text = "Retry it",
-                callback = function()
-                    send(hub, pending)
-                end,
-            },
-            {
-                text = "Discard it and continue",
-                callback = function()
-                    settings.roulette_pending = nil
-                    flush()
-                    R.decide(hub, decision, book)
-                end,
-            },
-        })
-        return
+    hub.plugin.settings.roulette_pending = nil
+    G_reader_settings:flush()
+    Toast.show(confirmations[decision])
+    if hub.route.kind == "detail" then
+        hub:navigate({ kind = "matches" }, true)
+    elseif hub.route.kind == "matches" then
+        hub:load()
+    else
+        hub:refreshView()
+        R.refill(hub)
     end
-    if not pending then
-        pending = {
-            account = hub.account,
-            payload = {
-                eventId = uuid(),
-                decision = decision,
-                book = R.book(book),
-                key = decision == "remove" and book.matchKey or nil,
-            },
-        }
-        settings.roulette_pending = pending
-        flush()
-    end
-    send(hub, pending)
 end
 
+-- Undoes the last decision: still waiting to be sent, it is simply dropped;
+-- already sent, BookOrbit undoes it.
 function R.undo(hub, id)
+    local queued = not id and Outbox.last(hub, "roulette")
+    if queued then
+        Outbox.remove(hub, queued.id)
+        if queued.card then
+            unmark(hub, queued.card)
+        end
+        G_reader_settings:flush()
+        hub:refreshView()
+        Toast.show("Decision undone.")
+        return
+    end
     local event = hub.plugin.settings.roulette_last_event
     id = id or (event and event.account == hub.account and event.id)
     if not id then
@@ -151,7 +212,8 @@ function R.undo(hub, id)
     end
     hub:fetch("POST", ROOT .. "/undo", { eventId = id }, function()
         hub.plugin.settings.roulette_last_event = nil
-        flush()
+        unmarkEvent(hub, id)
+        G_reader_settings:flush()
         hub:load()
         Toast.show("Decision undone.")
     end)
@@ -275,6 +337,12 @@ end
 function R.more(hub)
     hub:menu("Roulette", {
         {
+            text = "Keep cards for offline",
+            callback = function()
+                R.refill(hub, true)
+            end,
+        },
+        {
             text = "Full synopsis / Why recommended?",
             callback = function()
                 local b = hub.state.book or {}
@@ -308,6 +376,7 @@ function R.more(hub)
                         hub:fetch("POST", ROOT .. "/reset", { confirmation = "RESET" }, function()
                             hub.plugin.settings.roulette_pending = nil
                             hub.plugin.settings.roulette_last_event = nil
+                            hub.plugin.settings.hub_roulette_decided = nil
                             flush()
                             hub:load()
                         end)

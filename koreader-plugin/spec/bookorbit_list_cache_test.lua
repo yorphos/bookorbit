@@ -95,5 +95,24 @@ local newest = ListCache.key(account, { page = 5 })
 ListCache.put(newest, "not a page", 6)
 assertEqual(type(ListCache.get(newest).body), "table", "a malformed body is not saved over a page")
 
+-- Staged pages: kept in memory, written once by flush, never rewritten unchanged.
+package.loaded["bookorbit_list_cache"] = nil
+ListCache = require("bookorbit_list_cache")
+ListCache.MAX = 50
+local staged = ListCache.key(account, { staged = 1 })
+local writes_before = clock
+assertEqual(ListCache.stage(staged, { items = { 1 } }, 'W/"one"', 10), true, "a new page is a change")
+assertEqual(clock, writes_before, "staging does not write")
+assertEqual(ListCache.get(staged).etag, 'W/"one"', "a staged page is served from memory with its tag")
+assertEqual(ListCache.stats().dirty, 1, "one page waits to be written")
+assertEqual(ListCache.flush(), 1, "flush writes the waiting page")
+assertEqual(clock, writes_before + 1, "in one write")
+assertEqual(ListCache.stage(staged, { items = { 1 } }, 'W/"one"', 11), false, "the same tag is no change")
+assertEqual(ListCache.flush(), 0, "an unchanged page is not written again")
+assertEqual(ListCache.stage(staged, { items = { 2 } }, 'W/"two"', 12), true, "a new tag is a change")
+assertEqual(ListCache.flush(), 1, "and is written")
+ListCache.clear()
+assertEqual(ListCache.get(staged), nil, "clear forgets saved pages")
+
 os.remove = real_remove
 print("bookorbit_list_cache_test.lua: ok")

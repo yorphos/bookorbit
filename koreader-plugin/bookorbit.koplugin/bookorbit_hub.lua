@@ -18,8 +18,11 @@ local ConfirmBox = require("ui/widget/confirmbox")
 local Menu = require("ui/widget/menu")
 local TextViewer = require("ui/widget/textviewer")
 local Toast = require("bookorbit_toast")
+local Outbox = require("bookorbit_hub_outbox")
+local Diag = require("bookorbit_hub_diag")
 local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
+local socket = require("socket")
 local Hub = {}
 Hub.__index = Hub
 local ROOT = "/koreader/plugin/"
@@ -27,6 +30,21 @@ local ROOT = "/koreader/plugin/"
 -- a request may go without any change before this Kobo stops following it.
 local WATCH_DELAYS = { 15, 30, 60, 120, 300 }
 local WATCH_STALE_SECONDS = 7 * 24 * 3600
+-- Covers that arrive close together share one repaint.
+local COVER_REPAINT_DELAY = 0.3
+-- The next page of a list is fetched this long after the current one settles.
+local PREFETCH_DELAY = 2
+-- Cards kept in the Roulette deck, and when to ask for more.
+local ROULETTE_DECK = 20
+local ROULETTE_REFILL_BELOW = 4
+-- Background checks a reader opted into running without a subprocess stay short.
+local DIRECT_TIMEOUT = { 3, 5 }
+
+Hub.ROULETTE_REFILL_BELOW = ROULETTE_REFILL_BELOW
+
+function Hub:rouletteDecided()
+    return require("bookorbit_roulette").decided(self)
+end
 
 local function copy(value)
     local result = {}
@@ -87,10 +105,13 @@ function Hub:close()
     end
     self:savePosition()
     self.closed = true
-    if self.watchTimer then
-        UIManager:unschedule(self.watchTimer)
-        self.watchTimer = nil
+    for _, timer in ipairs({ "watchTimer", "coverTimer", "prefetchTimer", "outboxTimer", "refillTimer" }) do
+        if self[timer] then
+            UIManager:unschedule(self[timer])
+            self[timer] = nil
+        end
     end
+    ListCache.flush()
     self.catalog.catalog_closed = true
     self.catalog:cancelThumbnailJobs()
     self.plugin._bookorbit_hub = nil
@@ -102,20 +123,107 @@ function Hub:close()
     end
 end
 
-function Hub:refreshView()
+-- mode: KOReader's refresh mode ("ui" unless given). region: repaint only that
+-- rectangle, for changes that stay inside it.
+function Hub:refreshView(mode, region)
     if self.closed or not self.page then
         return
     end
     if self.state and self.state.scrolling then
         self.route.scroll = self.state.scrolling:getScrolledOffset()
     end
+    if not region and not mode then
+        -- E-ink ghosting builds up over partial refreshes, whatever changed the
+        -- screen: clear it with a full refresh every few screens.
+        self.screens = (self.screens or 0) + 1
+        local every = tonumber(Model.setting(self.plugin.settings, "hub_flash_every")) or 8
+        if every > 0 and self.screens % every == 0 then
+            self.flashNext = true
+        end
+    end
+    if self.flashNext and not region then
+        mode, self.flashNext = "full", false
+    end
     self:present()
-    self.page:refresh()
+    self.page:refresh(mode, region)
     self.page.cropping_widget = self.state.scrolling
     self.catalog:scheduleThumbnailDownloads(self.visibleCovers)
 end
 
-function Hub:prepare(raw, request)
+-- Repaints only the notice line, when it is the one thing that changed (a
+-- background refresh that found nothing new). Falls back to a full repaint.
+function Hub:refreshNotice()
+    local rect = self.state and self.state.noticeRect
+    if rect and rect.w > 0 and rect.h > 0 then
+        self:refreshView("ui", rect)
+    else
+        self:refreshView()
+    end
+end
+
+-- Covers finished downloading. Only the covers that changed are repainted, in
+-- one coalesced refresh; a batch that changed nothing on screen repaints nothing.
+function Hub:coversArrived()
+    if self.closed then
+        return
+    end
+    if
+        self.route
+        and self.route.kind == "books"
+        and self.route.filter == "local"
+        and self.localListGeneration ~= self.catalog.on_device_generation
+    then
+        self:localBooks()
+        self:refreshView()
+        return
+    end
+    if self.coverTimer then
+        return
+    end
+    self.coverTimer = function()
+        self.coverTimer = nil
+        if self.closed then
+            return
+        end
+        local rects, missing = self.state.coverRects or {}, false
+        local x0, y0, x1, y1
+        for _, book in ipairs(self.visibleCovers or {}) do
+            if not book.coverPath and self.catalog:cachedThumbnailPath(book) then
+                local r = book.hub_cover_key and rects[book.hub_cover_key]
+                if r then
+                    x0 = math.min(x0 or r.x, r.x)
+                    y0 = math.min(y0 or r.y, r.y)
+                    x1 = math.max(x1 or (r.x + r.w), r.x + r.w)
+                    y1 = math.max(y1 or (r.y + r.h), r.y + r.h)
+                else
+                    missing = true
+                end
+            end
+        end
+        if not x0 then
+            if missing then
+                -- Arrived for something not painted yet: draw it next time without a refresh now.
+                self:present()
+                self.page:rebuild()
+            end
+            return
+        end
+        local bounds = self.state.bodyBounds or self.page.dimen
+        x0, y0 = math.max(x0, bounds.x), math.max(y0, bounds.y)
+        x1, y1 = math.min(x1, bounds.x + bounds.w), math.min(y1, bounds.y + bounds.h)
+        if x1 <= x0 or y1 <= y0 then
+            self:present()
+            self.page:rebuild()
+            return
+        end
+        self:refreshView("ui", Geom:new { x = x0, y = y0, w = x1 - x0, h = y1 - y0 })
+    end
+    UIManager:scheduleIn(COVER_REPAINT_DELAY, self.coverTimer)
+end
+
+-- hidden: a book that is not drawn now (a prefetched page), whose cover is
+-- fetched without repainting.
+function Hub:prepare(raw, request, hidden)
     local b = Model.book(raw, request)
     if b.bookId then
         b.localPath = self.catalog:onDeviceBookPath({ id = b.bookId })
@@ -155,7 +263,9 @@ function Hub:prepare(raw, request)
         b.hasCover = true
         b.hub_cover_key = md5(self.account .. "|" .. b.hub_cover_path .. "|" .. tostring(b.updatedAt or ""))
         b.coverPath = self.catalog:cachedThumbnailPath(b)
-        self.visibleCovers[#self.visibleCovers + 1] = b
+        if not hidden then
+            self.visibleCovers[#self.visibleCovers + 1] = b
+        end
     end
     return b
 end
@@ -186,7 +296,20 @@ function Hub:present()
     r.subpage = r.subpage or 1
     local body = s.body or {}
     if r.kind == "home" then
-        s.recommendations, s.continueReading, s.requests = {}, {}, {}
+        s.recommendations, s.continueReading, s.requests, s.ready = {}, {}, {}, {}
+        for _, request in ipairs(body.ready or {}) do
+            if #s.ready < 4 and request.bookId then
+                s.ready[#s.ready + 1] = self:prepare({
+                    bookId = request.bookId,
+                    title = request.title,
+                    authors = request.authors,
+                    seriesName = request.seriesName,
+                    seriesIndex = request.seriesIndex,
+                    updatedAt = request.updatedAt,
+                })
+            end
+        end
+        s.homeStats = Model.homeStats(body)
         for i, b in ipairs(body.recommendations or {}) do
             if i <= 4 then
                 s.recommendations[#s.recommendations + 1] = self:prepare(b)
@@ -203,7 +326,23 @@ function Hub:present()
             end
         end
     elseif r.kind == "roulette" then
-        s.book = body.items and body.items[1] and self:prepare(body.items[1]) or nil
+        local decided, hidden = self:rouletteDecided(), {}
+        s.book, s.remaining = nil, 0
+        for _, item in ipairs(body.items or {}) do
+            if not decided[item.rouletteKey or ""] then
+                s.remaining = s.remaining + 1
+                if s.book then
+                    hidden[#hidden + 1] = self:prepare(item, nil, true)
+                else
+                    s.book = self:prepare(item)
+                end
+            end
+        end
+        if r.seed then
+            s.title = "More like " .. tostring(r.seed.title or "this")
+        end
+        -- The rest of the deck's covers come down quietly, so cards work offline.
+        self.catalog:prefetchThumbnails(hidden, self.catalog.thumbnail_generation)
     elseif r.kind == "detail" then
         s.book = self:prepare(body.title and body or r.book)
         s.related = {}
@@ -215,6 +354,17 @@ function Hub:present()
         end
     elseif r.kind == "request_detail" then
         s.book = self:prepare(body.title and body or r.request, true)
+    elseif r.kind == "stats" then
+        s.finished = {}
+        for i, b in ipairs(body.recentlyFinished or {}) do
+            if i <= 4 then
+                s.finished[#s.finished + 1] = self:prepare(b)
+            end
+        end
+    elseif r.kind == "hub_settings" then
+        s.settings = self.plugin.settings
+    elseif r.kind == "diagnostics" then
+        s.diag = self:diagnostics()
     else
         s.visible = {}
         local items = body.items or {}
@@ -261,6 +411,14 @@ function Hub:present()
                 book.authors = {}
                 book.action = { kind = "collection", collection = b }
                 book.hint = tostring(b.bookCount or 0) .. " books"
+            elseif r.kind == "social" then
+                local verb = b.kind == "recommended" and "recommends"
+                    or b.kind == "finished" and "finished"
+                    or "is reading"
+                book.hint = tostring(b.friend or "A reader")
+                    .. " "
+                    .. verb
+                    .. (b.note and b.note ~= "" and (": " .. b.note) or "")
             elseif r.kind == "releases" then
                 book.authors = { table.concat({ b.format or "?", Model.language(b.language), b.source or "" }, " · ") }
                 book.hint = Model.bytes(b.sizeBytes)
@@ -296,6 +454,61 @@ function Hub:present()
     end
 end
 
+-- What the Diagnostics screen shows: state that is otherwise invisible.
+function Hub:diagnostics()
+    local settings = self.plugin.settings
+    local watched, outbox, events = {}, {}, {}
+    for id, item in pairs(self:watched()) do
+        watched[#watched + 1] = tostring(item.title or ("Request " .. id))
+            .. " · "
+            .. Model.stage({ status = item.status })
+            .. " · changed "
+            .. Model.ago(item.changedAt)
+    end
+    for _, e in ipairs(Outbox.items(self)) do
+        outbox[#outbox + 1] = tostring(e.label)
+            .. " · "
+            .. Model.ago(e.created)
+            .. ((e.attempts or 0) > 0 and (" · tried " .. e.attempts .. " times") or "")
+    end
+    local log = Diag.events(settings)
+    for i = #log, math.max(1, #log - 11), -1 do
+        local e = log[i]
+        events[#events + 1] = Model.ago(e.t) .. " · " .. (e.kind == "error" and "Error: " or "") .. tostring(e.text)
+    end
+    local covers, cover_bytes = 0, 0
+    local dir = self.catalog.thumbnail_cache_dir
+    if dir and lfs.attributes(dir, "mode") == "directory" then
+        for name in lfs.dir(dir) do
+            if name:match("%.jpg$") then
+                covers = covers + 1
+                cover_bytes = cover_bytes + (lfs.attributes(dir .. "/" .. name, "size") or 0)
+            end
+        end
+    end
+    local timings = {}
+    for mode, t in pairs(Diag.timings()) do
+        timings[#timings + 1] = (mode == "direct" and "Quick checks" or "Background process")
+            .. string.format(": %d requests, average %.2f s, last %.2f s", t.count, t.average, t.last or 0)
+    end
+    table.sort(timings)
+    local upkeep = settings.hub_upkeep_last
+    return {
+        version = self.plugin.PLUGIN_VERSION,
+        user = settings.username,
+        connected = NetworkMgr:isConnected(),
+        watched = watched,
+        outbox = outbox,
+        cache = ListCache.stats(),
+        covers = covers,
+        coverBytes = cover_bytes,
+        timings = timings,
+        events = events,
+        upkeep = type(upkeep) == "table" and (Model.ago(upkeep.at) .. " · " .. tostring(upkeep.summary or ""))
+            or "Not run yet",
+    }
+end
+
 function Hub:path(r)
     local page = tostring(r.page or 1)
     local extra = ""
@@ -305,7 +518,20 @@ function Hub:path(r)
         end
     end
     if r.kind == "roulette" then
-        return ROOT .. "roulette"
+        local seed = ""
+        if r.seed and r.seed.bookId then
+            seed = "&seedBookId=" .. tostring(r.seed.bookId)
+        elseif r.seed and r.seed.title then
+            seed = "&seedTitle="
+                .. Model.encode(r.seed.title)
+                .. (r.seed.author and ("&seedAuthor=" .. Model.encode(r.seed.author)) or "")
+                .. (r.seed.genre and ("&seedGenre=" .. Model.encode(r.seed.genre)) or "")
+        end
+        return ROOT .. "roulette?count=" .. ROULETTE_DECK .. seed
+    elseif r.kind == "stats" then
+        return ROOT .. "hub/stats"
+    elseif r.kind == "social" then
+        return ROOT .. "hub/social"
     elseif r.kind == "matches" then
         return ROOT
             .. "roulette/matches?page="
@@ -404,6 +630,10 @@ local titles = {
     collections = "Collections",
     series_list = "Browse Series",
     releases = "Available releases",
+    stats = "Reading stats",
+    social = "Friends",
+    diagnostics = "Diagnostics",
+    hub_settings = "Hub options",
 }
 
 function Hub:navigate(route, replace, offline)
@@ -433,6 +663,10 @@ function Hub:navigate(route, replace, offline)
         self.tab = "books"
     elseif route.kind == "request_detail" or route.kind == "releases" then
         self.tab = "requests"
+    elseif route.kind == "social" then
+        self.tab = "discover"
+    elseif route.kind == "stats" then
+        self.tab = "books"
     end
     self.state = {
         route = route,
@@ -448,10 +682,11 @@ function Hub:navigate(route, replace, offline)
     end
     local path = self:path(route)
     if path then
-        local cached = ListCache.get(self.account .. "|hub|" .. path)
+        local cached = ListCache.load(self.account .. "|hub|" .. path)
         if cached then
             self.state.body = cached.body
             self.state.cached = true
+            self.state.etag = cached.etag
         end
     end
     if path then
@@ -485,37 +720,75 @@ function Hub:back()
     end
 end
 
+-- Shows the saved copy at once and asks the server whether it changed. With a
+-- saved copy on screen the check is quiet: only the notice line repaints, and
+-- an unchanged reply (304) repaints nothing else.
 function Hub:load(offline)
     local route, path = self.route, self:path(self.route)
     if not path then
         self:refreshView()
         return
     end
-    self:fetch("GET", path, nil, function(body)
-        if route.kind == "detail" then
-            local merged = copy(route.book)
-            for key, value in pairs(body) do
-                merged[key] = value
+    local key = self.account .. "|hub|" .. path
+    local background = self.state.cached == true and type(self.state.body) == "table" and next(self.state.body) ~= nil
+    self:fetch(
+        "GET",
+        path,
+        nil,
+        function(body, etag)
+            if route.kind == "detail" then
+                local merged = copy(route.book)
+                for k, value in pairs(body) do
+                    merged[k] = value
+                end
+                body = merged
             end
-            body = merged
-        end
-        self.state.body, self.state.cached, self.state.error = body, false, nil
-        ListCache.put(self.account .. "|hub|" .. path, body)
-        if route.kind == "request_detail" then
-            route.request = body
-            self:observe({ body })
-        elseif route.kind == "requests" then
-            self:observe(body.items or {})
-        elseif route.kind == "home" then
-            self:observe(body.requests or {})
-        end
-        self:refreshView()
-    end, offline)
+            local changed = ListCache.stage(key, body, etag)
+            self.state.body, self.state.cached, self.state.error, self.state.etag = body, false, nil, etag
+            if route.kind == "request_detail" then
+                route.request = body
+                self:observe({ body })
+            elseif route.kind == "requests" then
+                self:observe(body.items or {})
+            elseif route.kind == "home" then
+                self:observe(body.requests or {})
+                self:observe(body.ready or {})
+            end
+            if background and not changed then
+                self:refreshNotice()
+            else
+                self:refreshView()
+            end
+            self:prefetchNext(route, body)
+        end,
+        offline,
+        {
+            background = background,
+            etag = background and self.state.etag or nil,
+            unchanged = function()
+                ListCache.touch(key)
+                self.state.cached, self.state.error = false, nil
+                self:refreshNotice()
+                self:prefetchNext(route, self.state.body)
+            end,
+        }
+    )
 end
 
-function Hub:fetch(method, path, payload, done, offline)
+-- One request with a loading notice. opts.background: a saved copy is on
+-- screen, so only the notice line repaints. opts.etag and opts.unchanged: ask
+-- whether the copy changed, and what to do when it did not (a 304).
+function Hub:fetch(method, path, payload, done, offline, opts)
+    opts = opts or {}
     if self.closed then
         return
+    end
+    local function repaint()
+        if opts.background then
+            self:refreshNotice()
+        else
+            self:refreshView()
+        end
     end
     if self.busy then
         local active = self.activeFetch
@@ -526,20 +799,21 @@ function Hub:fetch(method, path, payload, done, offline)
         if active and active.method == method and active.path == path and active.route == self.route then
             return
         end
-        self.pendingFetch = { method, path, payload, done, offline, route = self.route }
+        self.pendingFetch = { method, path, payload, done, offline, opts, route = self.route }
         if not self.state.loading then
             self.state.loading = true
-            self:refreshView()
+            repaint()
         end
         return
     end
     if not NetworkMgr:isConnected() then
+        self.state.loading = false
         self.state.error = "Offline · Downloaded books are available in My Books"
-        self:refreshView()
+        repaint()
         if not offline then
             NetworkMgr:runWhenConnected(function()
                 if not self.closed then
-                    self:fetch(method, path, payload, done, true)
+                    self:fetch(method, path, payload, done, true, opts)
                 end
             end)
         end
@@ -549,47 +823,69 @@ function Hub:fetch(method, path, payload, done, offline)
     self.activeFetch = { method = method, path = path, route = route }
     self.busy = true
     self.state.loading = true
-    self:refreshView()
+    repaint()
     NetworkMgr:runWhenConnected(function()
         Trapper:wrap(function()
+            local started = socket.gettime()
+            local headers = opts.etag and { ["if-none-match"] = opts.etag } or nil
             local completed, result = self.client:runInSubprocess(function()
-                return self.client:requestBlocking(method, path, payload)
+                local meta = {}
+                local body, err, errbody = self.client:requestBlocking(method, path, payload, headers, meta)
+                if body then
+                    return { data = body, etag = meta.etag }
+                end
+                return nil, err, errbody
             end)
+            Diag.timing("subprocess", socket.gettime() - started)
             self.busy = false
             self.activeFetch = nil
             if self.closed then
                 return
             end
-            local settings = self.plugin.settings
-            if
-                self.account
-                ~= md5(
-                    table.concat({ settings.server_url or "", settings.username or "", settings.userkey or "" }, "|")
-                )
-            then
+            if not self:sameAccount() then
                 self:close()
                 return
             end
             if route == self.route then
                 self.state.loading = false
-                if completed and result and result.body then
-                    done(result.body)
+                local reply = completed and result and result.body
+                if type(reply) == "table" and reply.data ~= nil then
+                    Diag.guard(self, method .. " " .. path, done, reply.data, reply.etag)
+                elseif completed and result and tonumber(result.err) == 304 and opts.unchanged then
+                    opts.unchanged()
                 else
                     self.state.error =
                         Model.errorText(method, completed, result and result.err, result and result.errbody)
+                    Diag.event(
+                        self.plugin.settings,
+                        "error",
+                        method .. " " .. path:gsub("%?.*", "") .. ": " .. tostring(result and result.err or "cancelled")
+                    )
                     if method ~= "GET" then
                         Toast.error(self.state.error)
                     end
-                    self:refreshView()
+                    repaint()
                 end
             end
-            local pending = self.pendingFetch
-            self.pendingFetch = nil
-            if pending and pending.route == self.route then
-                self:fetch(pending[1], pending[2], pending[3], pending[4], pending[5])
-            end
+            self:runPending()
         end)
     end)
+end
+
+function Hub:sameAccount()
+    local settings = self.plugin.settings
+    return self.account
+        == md5(table.concat({ settings.server_url or "", settings.username or "", settings.userkey or "" }, "|"))
+end
+
+function Hub:runPending()
+    local pending = self.pendingFetch
+    self.pendingFetch = nil
+    if pending and pending.route == self.route then
+        self:fetch(pending[1], pending[2], pending[3], pending[4], pending[5], pending[6])
+    elseif not self.busy then
+        Outbox.drain(self)
+    end
 end
 
 -- Requests this account is waiting on. Saved in settings so a book that
@@ -627,6 +923,7 @@ function Hub:observe(requests)
         G_reader_settings:flush()
     end
     if #ready > 0 then
+        require("bookorbit_hub_upkeep").soon(self.plugin, 10)
         self.plugin:onBookOrbitDownloadComplete()
         local title = ready[1].title or "Your book"
         Toast.show(#ready == 1 and (title .. " is ready to read.") or (#ready .. " requested books are ready to read."))
@@ -654,8 +951,8 @@ function Hub:scheduleWatch(reset, delay)
     UIManager:scheduleIn(delay or WATCH_DELAYS[math.min(self.watchStep or 1, #WATCH_DELAYS)], self.watchTimer)
 end
 
--- One small request for the newest requests. Status changes move a request to
--- the top of that list, so the first page is enough. Never turns on Wi-Fi.
+-- Asks only about the followed requests, with the tag of the last answer, so a
+-- check where nothing moved is an empty 304. Never turns on Wi-Fi.
 function Hub:checkWatched()
     if self.closed then
         return
@@ -670,85 +967,207 @@ function Hub:checkWatched()
     if pruned then
         G_reader_settings:flush()
     end
-    if next(items) == nil then
+    local ids = {}
+    for key in pairs(items) do
+        if key:match("^%d+$") then
+            ids[#ids + 1] = key
+        end
+    end
+    if #ids == 0 then
         return
     end
     if self.busy or not NetworkMgr:isConnected() then
         self:scheduleWatch(false, self.busy and 3 or nil)
         return
     end
-    self.watchStep = (self.watchStep or 1) + 1
-    local path = ROOT .. "requests?page=1&filter=all"
-    self:quietGet(path, function(body)
-        local list = body.items or {}
-        self:observe(list)
-        self:showWatchedChanges(path, body, list)
-        self:scheduleWatch(false)
+    table.sort(ids, function(a, b)
+        return tonumber(a) < tonumber(b)
     end)
+    self.watchStep = (self.watchStep or 1) + 1
+    local path = ROOT .. "requests/watch?ids=" .. table.concat(ids, ",", 1, math.min(#ids, 50))
+    local previous = self.watchTag and self.watchTag.path == path and self.watchTag.etag or nil
+    self:quietRequest("GET", path, nil, function(body, etag)
+        self.watchTag = { path = path, etag = etag }
+        local list, gone = {}, false
+        for _, r in ipairs(body.items or {}) do
+            if r.gone then
+                items[tostring(r.id)] = nil
+                gone = true
+            else
+                list[#list + 1] = r
+            end
+        end
+        if gone then
+            G_reader_settings:flush()
+        end
+        self:observe(list)
+        self:showWatchedChanges(list)
+        self:scheduleWatch(false)
+    end, function()
+        -- A 304 means nothing moved; any other failure waits for the next check.
+        self:scheduleWatch(false)
+    end, { etag = previous, direct = self.plugin.settings.hub_direct_requests == true })
 end
 
--- Repaints only the open request screen, and only when something visible changed.
-function Hub:showWatchedChanges(path, body, list)
+-- Patches the requests on screen with their new state and repaints only when
+-- something visible changed.
+function Hub:showWatchedChanges(list)
     local route, state = self.route, self.state
     local function signature(r)
         return tostring(r.status) .. ":" .. tostring(r.progressPercent)
     end
+    local fresh = {}
+    for _, r in ipairs(list) do
+        fresh[tostring(r.id)] = r
+    end
     if route.kind == "request_detail" then
-        for _, r in ipairs(list) do
-            if tostring(r.id) == tostring(route.id) and signature(r) ~= signature(state.body or {}) then
-                route.request, state.body = r, r
-                self:refreshView()
-            end
-        end
-    elseif route.kind == "requests" and self:path(route) == path then
-        local before, after = {}, {}
-        for _, r in ipairs((state.body or {}).items or {}) do
-            before[#before + 1] = tostring(r.id) .. signature(r)
-        end
-        for _, r in ipairs(list) do
-            after[#after + 1] = tostring(r.id) .. signature(r)
-        end
-        if table.concat(before, ",") ~= table.concat(after, ",") then
-            state.body = body
-            ListCache.put(self.account .. "|hub|" .. path, body)
+        local r = fresh[tostring(route.id)]
+        if r and signature(r) ~= signature(state.body or {}) then
+            route.request, state.body = r, r
             self:refreshView()
         end
+        return
+    end
+    local items = route.kind == "requests" and (state.body or {}).items
+        or route.kind == "home" and (state.body or {}).requests
+    if type(items) ~= "table" then
+        return
+    end
+    local changed = false
+    for i, r in ipairs(items) do
+        local update = fresh[tostring(r.id)]
+        if update and signature(update) ~= signature(r) then
+            items[i] = update
+            changed = true
+        end
+    end
+    if changed then
+        local path = self:path(route)
+        if path then
+            ListCache.stage(self.account .. "|hub|" .. path, state.body)
+        end
+        self:refreshView()
     end
 end
 
--- A background GET: no loading notice, no error notice, no Wi-Fi prompt.
+-- A background request: no loading notice, no error notice, no Wi-Fi prompt.
 -- Actions tapped meanwhile wait in pendingFetch and run when it finishes.
-function Hub:quietGet(path, done)
+-- opts.etag asks whether a copy changed (fail then gets 304); opts.direct runs
+-- it in this process with a short timeout instead of a subprocess.
+function Hub:quietRequest(method, path, payload, done, fail, opts)
+    opts = opts or {}
     self.busy = true
-    self.activeFetch = { method = "GET", path = path, route = self.route, quiet = true }
+    self.activeFetch = { method = method, path = path, route = self.route, quiet = true }
+    local direct = opts.direct == true and method == "GET"
     Trapper:wrap(function()
-        local completed, result = self.client:runInSubprocess(function()
-            return self.client:requestBlocking("GET", path)
-        end)
+        local started = socket.gettime()
+        local headers = opts.etag and { ["if-none-match"] = opts.etag } or nil
+        local function call()
+            local meta = { timeout = direct and DIRECT_TIMEOUT or nil }
+            local body, err, errbody = self.client:requestBlocking(method, path, payload, headers, meta)
+            if body then
+                return { data = body, etag = meta.etag }
+            end
+            return nil, err, errbody
+        end
+        local completed, result
+        if direct then
+            local ok, body, err, errbody = pcall(call)
+            completed = true
+            result = ok and { body = body, err = err, errbody = errbody } or { err = tostring(body) }
+        else
+            completed, result = self.client:runInSubprocess(call)
+        end
+        Diag.timing(direct and "direct" or "subprocess", socket.gettime() - started)
         self.busy = false
         self.activeFetch = nil
         if self.closed then
             return
         end
-        local settings = self.plugin.settings
-        if
-            self.account
-            ~= md5(table.concat({ settings.server_url or "", settings.username or "", settings.userkey or "" }, "|"))
-        then
+        if not self:sameAccount() then
             self:close()
             return
         end
-        if completed and result and result.body then
-            done(result.body)
-        else
-            self:scheduleWatch(false)
+        local reply = completed and result and result.body
+        if type(reply) == "table" and reply.data ~= nil then
+            Diag.guard(self, "background " .. path:gsub("%?.*", ""), done, reply.data, reply.etag)
+        elseif fail then
+            fail(completed and result and result.err or "cancelled", result and result.errbody)
         end
-        local pending = self.pendingFetch
-        self.pendingFetch = nil
-        if pending and pending.route == self.route then
-            self:fetch(pending[1], pending[2], pending[3], pending[4], pending[5])
-        end
+        self:runPending()
     end)
+end
+
+-- Lists worth reading ahead: answered by BookOrbit itself, so a prefetch never
+-- holds a tap behind a slow public catalog.
+local PREFETCH_KINDS = {
+    books = true,
+    requests = true,
+    wishlist = true,
+    collections = true,
+    author_list = true,
+    series_list = true,
+    matches = true,
+}
+
+-- After a list settles: its next page and the first library books' details,
+-- fetched quietly into the saved pages, covers included, without a repaint.
+function Hub:prefetchNext(route, body)
+    if self.prefetchTimer then
+        UIManager:unschedule(self.prefetchTimer)
+        self.prefetchTimer = nil
+    end
+    if not PREFETCH_KINDS[route.kind] or route.filter == "local" or type(body) ~= "table" then
+        return
+    end
+    local targets = {}
+    local has_more = body.hasMore == true or (body.total and (route.page or 1) * (body.pageSize or 20) < body.total)
+    if has_more then
+        local next_route = copy(route)
+        next_route.page, next_route.subpage, next_route.scroll = (route.page or 1) + 1, 1, nil
+        targets[#targets + 1] = { path = self:path(next_route), request = route.kind == "requests" }
+    end
+    for i, b in ipairs(self.state.visible or {}) do
+        if i <= 2 and b.bookId and not b.request and not b.action then
+            targets[#targets + 1] = { path = ROOT .. "catalog/books/" .. b.bookId }
+        end
+    end
+    if #targets == 0 then
+        return
+    end
+    self.prefetchTimer = function()
+        self.prefetchTimer = nil
+        self:prefetchPaths(targets, 1)
+    end
+    UIManager:scheduleIn(PREFETCH_DELAY, self.prefetchTimer)
+end
+
+function Hub:prefetchPaths(targets, index)
+    local target = targets[index]
+    if not target or not target.path or self.closed or self.busy or not NetworkMgr:isConnected() then
+        return
+    end
+    local key = self.account .. "|hub|" .. target.path
+    local saved = ListCache.get(key)
+    if saved and os.time() - (saved.saved_at or 0) < 120 then
+        return self:prefetchPaths(targets, index + 1)
+    end
+    self:quietRequest("GET", target.path, nil, function(body, etag)
+        ListCache.stage(key, body, etag)
+        local hidden = {}
+        for _, item in ipairs(body.items or {}) do
+            hidden[#hidden + 1] = self:prepare(item, target.request, true)
+        end
+        if #hidden > 0 then
+            self.catalog:prefetchThumbnails(hidden, self.catalog.thumbnail_generation)
+        end
+        self:prefetchPaths(targets, index + 1)
+    end, function(err)
+        if tonumber(err) == 304 then
+            ListCache.touch(key)
+            self:prefetchPaths(targets, index + 1)
+        end
+    end, { etag = saved and saved.etag or nil })
 end
 
 function Hub:localBooks()
@@ -857,10 +1276,53 @@ function Hub:primary(book)
             id = book.requestId,
             request = { id = book.requestId, title = book.title, authors = book.authors, status = book.requestStatus },
         })
+    elseif not NetworkMgr:isConnected() then
+        self:queue({
+            method = "POST",
+            path = ROOT .. "requests",
+            payload = Model.requestPayload(book),
+            label = "Request: " .. tostring(book.title),
+            kind = "request",
+            key = "request:" .. tostring(book.title) .. "|" .. tostring((book.authors or {})[1]),
+        })
     else
         self:fetch("POST", ROOT .. "requests", Model.requestPayload(book), function(body)
             self:navigate({ kind = "request_detail", id = body.request.id, request = body.request })
         end)
+    end
+end
+
+-- Saves an action for when BookOrbit can be reached, and says so.
+function Hub:queue(entry)
+    Outbox.add(self, entry)
+    Toast.show("Saved. It will be sent when BookOrbit can be reached.")
+    if self.route.kind == "diagnostics" then
+        self:refreshView()
+    end
+end
+
+-- A queued action reached BookOrbit.
+function Hub:onOutboxSent(entry, body)
+    if entry.kind == "roulette" then
+        self.plugin.settings.roulette_last_event = body
+                and not body.undone
+                and { account = self.account, id = entry.payload.eventId }
+            or nil
+    elseif entry.kind == "request" and type(body) == "table" and body.request then
+        self:observe({ body.request })
+        Toast.show(tostring(body.request.title or "Your request") .. " was sent to BookOrbit.")
+    elseif entry.kind ~= "report" then
+        Toast.show(tostring(entry.label or "A saved action") .. " was sent.")
+    end
+    Diag.event(self.plugin.settings, "info", "Sent: " .. tostring(entry.label))
+end
+
+-- BookOrbit refused a queued action; it is not retried.
+function Hub:onOutboxDropped(entry, err, errbody)
+    local reason = Model.serverMessage(errbody) or tostring(err)
+    Diag.event(self.plugin.settings, "error", "Not sent: " .. tostring(entry.label) .. " (" .. reason .. ")")
+    if entry.kind ~= "report" and entry.kind ~= "roulette" then
+        Toast.error(tostring(entry.label) .. " could not be sent: " .. reason)
     end
 end
 
@@ -923,6 +1385,12 @@ function Hub:bookOptions(book)
             text = "Change file",
             callback = function()
                 self:changeFile(book)
+            end,
+        }
+        rows[#rows + 1] = {
+            text = "Recommend to other readers",
+            callback = function()
+                self:recommend(book)
             end,
         }
         if book.localPath then
@@ -1010,7 +1478,7 @@ end
 
 function Hub:collectionPicker(book, page)
     page = page or 1
-    self:fetch("GET", ROOT .. "hub/collections?bookId=" .. book.bookId .. "&page=" .. page, nil, function(body)
+    local function show(body)
         local rows = {}
         for _, c in ipairs(body.items or {}) do
             local collection = c
@@ -1021,6 +1489,16 @@ function Hub:collectionPicker(book, page)
                         {
                             text = "Add book",
                             callback = function()
+                                if not NetworkMgr:isConnected() then
+                                    return self:queue({
+                                        method = "POST",
+                                        path = ROOT .. "hub/collections/" .. collection.id .. "/books",
+                                        payload = { bookId = book.bookId },
+                                        label = "Add to " .. tostring(collection.name),
+                                        kind = "collection",
+                                        key = "collection:" .. collection.id .. ":" .. book.bookId,
+                                    })
+                                end
                                 self:fetch(
                                     "POST",
                                     ROOT .. "hub/collections/" .. collection.id .. "/books",
@@ -1034,6 +1512,15 @@ function Hub:collectionPicker(book, page)
                         {
                             text = "Remove book",
                             callback = function()
+                                if not NetworkMgr:isConnected() then
+                                    return self:queue({
+                                        method = "DELETE",
+                                        path = ROOT .. "hub/collections/" .. collection.id .. "/books/" .. book.bookId,
+                                        label = "Remove from " .. tostring(collection.name),
+                                        kind = "collection",
+                                        key = "collection:" .. collection.id .. ":" .. book.bookId,
+                                    })
+                                end
                                 self:fetch(
                                     "DELETE",
                                     ROOT .. "hub/collections/" .. collection.id .. "/books/" .. book.bookId,
@@ -1048,9 +1535,6 @@ function Hub:collectionPicker(book, page)
                 end,
             }
         end
-        if #rows == 0 then
-            rows[1] = { text = "No editable collections. Create a collection in BookOrbit." }
-        end
         if body.hasMore then
             rows[#rows + 1] = {
                 text = "More collections",
@@ -1059,8 +1543,111 @@ function Hub:collectionPicker(book, page)
                 end,
             }
         end
+        if NetworkMgr:isConnected() then
+            rows[#rows + 1] = {
+                text = "New collection with this book…",
+                callback = function()
+                    self:createCollection(book)
+                end,
+            }
+        end
         self:menu("Your collections", rows)
-    end)
+    end
+    if not NetworkMgr:isConnected() then
+        -- Offline: the collections saved from the Collections tab; changes wait in the outbox.
+        local saved = ListCache.get(self.account .. "|hub|" .. ROOT .. "hub/collections?page=" .. page)
+        if saved then
+            return show(saved.body)
+        end
+    end
+    self:fetch("GET", ROOT .. "hub/collections?bookId=" .. book.bookId .. "&page=" .. page, nil, show)
+end
+
+-- Asks for a name, creates the collection and, given a book, adds it.
+function Hub:createCollection(book)
+    local dialog
+    dialog = InputDialog:new {
+        title = "New collection",
+        input = "",
+        buttons = {
+            {
+                {
+                    text = "Cancel",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = "Create",
+                    is_enter_default = true,
+                    callback = function()
+                        local name = (dialog:getInputText() or ""):match("^%s*(.-)%s*$")
+                        if name == "" then
+                            return
+                        end
+                        UIManager:close(dialog)
+                        self:fetch("POST", ROOT .. "hub/collections", { name = name }, function(created)
+                            if not (book and book.bookId) then
+                                Toast.show("Created " .. tostring(created.name))
+                                if self.route.kind == "collections" then
+                                    self:load(true)
+                                end
+                                return
+                            end
+                            self:fetch(
+                                "POST",
+                                ROOT .. "hub/collections/" .. created.id .. "/books",
+                                { bookId = book.bookId },
+                                function()
+                                    Toast.show("Created " .. tostring(created.name) .. " with this book")
+                                end
+                            )
+                        end)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+-- Shares a library book with the other readers who turned sharing on.
+function Hub:recommend(book)
+    local dialog
+    dialog = InputDialog:new {
+        title = "Recommend to other readers",
+        input = "",
+        description = "Optional: a short note. Only readers who share their reading see it.",
+        buttons = {
+            {
+                {
+                    text = "Cancel",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = "Recommend",
+                    is_enter_default = true,
+                    callback = function()
+                        local note = (dialog:getInputText() or ""):match("^%s*(.-)%s*$")
+                        UIManager:close(dialog)
+                        self:fetch(
+                            "POST",
+                            ROOT .. "hub/social/recommendations",
+                            { bookId = book.bookId, note = note ~= "" and note:sub(1, 280) or nil },
+                            function()
+                                Toast.show("Recommended to other readers")
+                            end
+                        )
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 function Hub:removeLocal(book)
@@ -1134,12 +1721,102 @@ function Hub:action(a)
                 end,
             },
             {
+                text = "New releases",
+                callback = function()
+                    self:action({ kind = "new_releases" })
+                end,
+            },
+            {
+                text = "Friends: what other readers enjoy",
+                callback = function()
+                    self:navigate({ kind = "social" })
+                end,
+            },
+            {
                 text = "Your tastes",
                 callback = function()
                     Roulette.tastes(self)
                 end,
             },
         })
+        return
+    elseif a.kind == "stats" or a.kind == "social" or a.kind == "diagnostics" or a.kind == "hub_settings" then
+        self:navigate({ kind = a.kind })
+        return
+    elseif a.kind == "finished_books" then
+        self:navigate({ kind = "books", readStatus = "finished", sort = "recently_read", page = 1 })
+        return
+    elseif a.kind == "share_toggle" then
+        local share = not (self.state.body and self.state.body.share)
+        self:fetch("POST", ROOT .. "hub/social/sharing", { share = share }, function()
+            Toast.show(share and "Sharing your reading with other readers" or "Sharing turned off")
+            self:load(false)
+        end)
+        return
+    elseif a.kind == "more_like_this" then
+        local b = a.book or {}
+        local seed = b.bookId and { bookId = b.bookId, title = b.title }
+            or { title = b.title, author = (b.authors or {})[1], genre = (b.genres or {})[1] }
+        self:navigate({ kind = "roulette", seed = seed })
+        return
+    elseif a.kind == "create_collection" then
+        self:createCollection(nil)
+        return
+    elseif a.kind == "hub_option" then
+        local settings = self.plugin.settings
+        if Model.option(a.key) then
+            settings[a.key] = Model.nextSetting(settings, a.key)
+            G_reader_settings:flush()
+            if a.key == "hub_charging_downloads" or a.key == "hub_cleanup_days" then
+                require("bookorbit_hub_upkeep").soon(self.plugin, 5)
+            end
+            self:refreshView()
+        end
+        return
+    elseif a.kind == "clear_cache" then
+        UIManager:show(ConfirmBox:new {
+            text = "Forget saved pages and downloaded covers? Books, notes and queued actions are kept.",
+            ok_text = "Clear",
+            ok_callback = function()
+                ListCache.clear()
+                local dir = self.catalog.thumbnail_cache_dir
+                local removed = 0
+                if dir and lfs.attributes(dir, "mode") == "directory" then
+                    local doomed = {}
+                    for name in lfs.dir(dir) do
+                        if name:match("%.jpg$") then
+                            doomed[#doomed + 1] = dir .. "/" .. name
+                        end
+                    end
+                    for _, path in ipairs(doomed) do
+                        if os.remove(path) then
+                            removed = removed + 1
+                        end
+                    end
+                end
+                self.catalog:cancelThumbnailJobs()
+                require("bookorbit_board_ui").clearCoverCache()
+                Diag.event(self.plugin.settings, "info", "Cleared saved pages and " .. removed .. " covers")
+                self:refreshView()
+            end,
+        })
+        return
+    elseif a.kind == "outbox_send" then
+        Outbox.drain(self)
+        Toast.show(NetworkMgr:isConnected() and "Sending saved actions…" or "Waiting for Wi-Fi")
+        return
+    elseif a.kind == "outbox_discard" then
+        UIManager:show(ConfirmBox:new {
+            text = "Discard " .. Outbox.count(self) .. " saved actions without sending them?",
+            ok_text = "Discard",
+            ok_callback = function()
+                Outbox.clear(self)
+                self:refreshView()
+            end,
+        })
+        return
+    elseif a.kind == "upkeep_now" then
+        require("bookorbit_hub_upkeep").run(self.plugin, { force = true, report = true })
         return
     elseif a.kind == "resume_reading" then
         if self.plugin.ui and self.plugin.ui.document == self.resumeDocument then
@@ -1274,6 +1951,17 @@ function Hub:action(a)
         self:navigate({ kind = "books", collectionId = a.collection.id, page = 1 })
     elseif a.kind == "book_options" then
         self:bookOptions(a.book)
+    elseif a.kind == "save_wishlist" and not NetworkMgr:isConnected() then
+        local b = a.book
+        local key = b.wishlistKey
+        self:queue({
+            method = key and "DELETE" or "POST",
+            path = ROOT .. "hub/wishlist" .. (key and "/" .. key or ""),
+            payload = not key and Model.wishlist(b) or nil,
+            label = (key and "Remove from Wishlist: " or "Wishlist: ") .. tostring(b.title),
+            kind = "wishlist",
+            key = "wishlist:" .. tostring(b.title) .. "|" .. tostring((b.authors or {})[1]),
+        })
     elseif a.kind == "save_wishlist" then
         local b = a.book
         self:fetch(
@@ -1439,15 +2127,7 @@ function Hub.open(plugin, offline, initial)
             G_reader_settings:flush()
         end,
         updateItems = function()
-            if
-                self.route
-                and self.route.kind == "books"
-                and self.route.filter == "local"
-                and self.localListGeneration ~= self.catalog.on_device_generation
-            then
-                self:localBooks()
-            end
-            self:refreshView()
+            self:coversArrived()
         end,
         showBookDetail = function(_, detail)
             self:openBook(Model.book(detail))
@@ -1485,6 +2165,8 @@ function Hub.open(plugin, offline, initial)
             genre_list = true,
             roulette = true,
             matches = true,
+            stats = true,
+            social = true,
         })[route.kind]
     then
         route = { kind = remembered and remembered.tab or "home" }
@@ -1502,7 +2184,9 @@ function Hub.open(plugin, offline, initial)
             return widget
         end,
         on_action = function(_, action)
-            self:action(action)
+            Diag.guard(self, "action " .. tostring(action.kind), function()
+                self:action(action)
+            end)
         end,
         on_back = function()
             self:back()
@@ -1593,11 +2277,24 @@ function Hub.open(plugin, offline, initial)
             bb:paintBorder(d.x, d.y, d.w, d.h, Theme.px(2), Theme.ink.black)
         end
     end
+    -- Saved pages are written before the Kobo sleeps, not on every refresh.
+    self.page.onSuspend = function()
+        ListCache.flush()
+        G_reader_settings:flush()
+    end
+    self.page.onNetworkConnected = function()
+        if not self.closed then
+            Outbox.drain(self)
+            self:scheduleWatch(true, 3)
+        end
+    end
     plugin._bookorbit_hub, plugin.catalog_browser = self, self.page
     UIManager:show(self.page)
     self:navigate(route, true, offline)
     -- Catch requests that finished while BookOrbit was closed.
     self:scheduleWatch(true, 3)
+    Outbox.retryLater(self, 4)
+    require("bookorbit_hub_upkeep").soon(plugin, 20)
     return self
 end
 

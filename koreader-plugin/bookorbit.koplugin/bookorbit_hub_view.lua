@@ -4,6 +4,7 @@ local MenuUI = require("bookorbit_menu_ui")
 local Theme = require("bookorbit_hub_theme")
 local Model = require("bookorbit_hub_model")
 local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Geom = require("ui/geometry")
 local px, ink = Theme.px, Theme.ink
 local text, row, space = UI.text, UI.hstack, UI.space
@@ -18,6 +19,28 @@ local function stack(options, items)
     return UI.vstack(options, spaced)
 end
 local View = {}
+
+-- Remembers where its child was painted, under a key, so a later change inside
+-- it (a cover that arrived, a notice that cleared) can refresh only that spot.
+local Slot = WidgetContainer:extend {
+    rects = nil,
+    key = nil,
+}
+
+function Slot:getSize()
+    return self[1]:getSize()
+end
+
+function Slot:paintTo(bb, x, y)
+    local size = self[1]:getSize()
+    if self.rects and self.key then
+        self.rects[self.key] = Geom:new { x = x, y = y, w = size.w, h = size.h }
+    end
+    self[1]:paintTo(bb, x, y)
+end
+
+-- Where the covers of the screen being built were painted, by cover key.
+local cover_rects = nil
 
 local function label(value, size, width, options)
     options = options or {}
@@ -72,12 +95,40 @@ local function heading(title, w, action, subtitle)
 end
 
 function View.cover(book, w, h)
-    return UI.cover(
+    local widget = UI.cover(
         book,
         w,
         h,
         { path = book.coverPath, border = math.max(1, px(0.5)), border_col = ink.g8, valign = "center" }
     )
+    if cover_rects and book.hub_cover_key and not book.coverPath then
+        return Slot:new { rects = cover_rects, key = book.hub_cover_key, widget }
+    end
+    return widget
+end
+
+-- The status line under a page's heading. It always takes its line, even
+-- empty, so the page below never moves when it changes and it can repaint alone.
+-- fallback: a subtitle shown on the same line when there is nothing to report.
+local function notice(state, w, list, fallback)
+    local body = state.body or {}
+    local text
+    if state.loading then
+        text = state.cached and "Saved copy · Checking for changes…" or "Loading…"
+    elseif state.error then
+        text = state.error
+    elseif state.cached then
+        text = list and "Saved results" or "Saved on this Kobo · Refresh for the latest status"
+    end
+    if list and (body.partial or body.truncated) then
+        text = (text and (text .. " · ") or "") .. "Some sources unavailable · Refresh or refine"
+    end
+    state.noticeRect = nil
+    return Slot:new {
+        rects = state,
+        key = "noticeRect",
+        label(text or fallback or " ", Theme.small, w, { col = ink.g5, lines = 1 }),
+    }
 end
 
 function View.card(book, w, compact)
@@ -95,8 +146,9 @@ function View.card(book, w, compact)
         ),
         label(table.concat(book.authors or {}, ", "), Theme.small, tw, { col = ink.g5 }),
     }
-    if not compact and Model.meta(book) ~= "" then
-        details[#details + 1] = label(Model.meta(book), 12, tw, { col = ink.g5 })
+    local meta = not compact and Model.meta(book) or ""
+    if meta ~= "" then
+        details[#details + 1] = label(meta, 12, tw, { col = ink.g5 })
     end
     local status = book.hint or (book.request and Model.stage(book.request) or Model.status(book))
     local percent = Model.percent(
@@ -158,6 +210,7 @@ local listKinds = {
     wishlist = true,
     collections = true,
     series = true,
+    social = true,
 }
 function View.isList(kind)
     return listKinds[kind] == true
@@ -295,16 +348,30 @@ local function listBody(state, g)
         children[#children + 1] =
             View.button(state.filterLabel or "Filters & sort", w, { kind = "filters" }, false, "sliders-horizontal")
     end
-    local notice = state.loading and "Loading…" or state.error or (state.cached and "Saved results" or nil)
-    if body.partial or body.truncated then
-        notice = (notice and (notice .. " · ") or "") .. "Some sources unavailable · Refresh or refine"
+    if r.kind == "social" then
+        children[#children + 1] = View.button(
+            body.share and "Stop sharing my reading" or "Share my reading with other readers",
+            w,
+            { kind = "share_toggle" },
+            not body.share
+        )
+        if not body.share then
+            state.empty = "Nothing to show until you share."
+            children[#children + 1] = label(
+                "Readers on this BookOrbit who share see what each other are reading, finished and recommend. Only books you may open are listed. Turn it off any time.",
+                Theme.small,
+                w,
+                { lines = 4, col = ink.g5 }
+            )
+        elseif body.people then
+            state.subtitle = #body.people == 0 and "No other reader shares yet"
+                or (#body.people .. (#body.people == 1 and " reader shares" or " readers share") .. " with you")
+        end
     end
-    if notice then
-        children[#children + 1] = label(notice, Theme.small, w, { col = ink.g5, lines = 1 })
+    if r.kind == "collections" then
+        children[#children + 1] = View.button("New collection", w, { kind = "create_collection" }, false, "plus")
     end
-    if state.subtitle then
-        children[#children + 1] = label(state.subtitle, Theme.small, w, { col = ink.g5, lines = 1 })
-    end
+    children[#children + 1] = notice(state, w, true, state.subtitle)
     local books = state.visible or {}
     for _, book in ipairs(books) do
         children[#children + 1] = View.listCard(book, w)
@@ -320,8 +387,9 @@ local function listBody(state, g)
         View.button("Next ›", pager_width, state.next and { kind = "page", delta = 1 } or nil),
     })
     local content = stack({ w = w, gap = px(7) }, children)
-    state.listContentHeight = content:getSize().h
-    return stack({ w = w }, { content, space(1, math.max(0, g.body - content:getSize().h - pager:getSize().h)), pager })
+    local content_h = content:getSize().h
+    state.listContentHeight = content_h
+    return stack({ w = w }, { content, space(1, math.max(0, g.body - content_h - pager:getSize().h)), pager })
 end
 
 -- Five steps, each a bar over its name: done and current steps are solid,
@@ -429,7 +497,17 @@ end
 
 local function home(state, g)
     local body, w = state.body or {}, g.content
-    local children = {
+    local children = {}
+    if state.homeStats then
+        children[#children + 1] = UI.hit(
+            row({ w = w, h = px(26), gap = px(6) }, {
+                UI.icon("flame", px(16)),
+                label(state.homeStats, Theme.small, w - px(22), { b = true }),
+            }),
+            { kind = "stats" }
+        )
+    end
+    for _, item in ipairs({
         heading(
             "For You",
             w,
@@ -438,11 +516,17 @@ local function home(state, g)
         ),
         shelf(state.recommendations or {}, w, 4, true),
         heading("Continue Reading", w, { kind = "books_filter", filter = "reading" }),
-    }
+    }) do
+        children[#children + 1] = item
+    end
     if state.continueReading and state.continueReading[1] then
         children[#children + 1] = View.card(state.continueReading[1], w, true)
     else
         children[#children + 1] = label("Your next chapter starts in My Books.", Theme.small, w)
+    end
+    if state.ready and #state.ready > 0 then
+        children[#children + 1] = heading("Ready to Read", w, { kind = "request_filter", filter = "ready" })
+        children[#children + 1] = shelf(state.ready, w, 4, true)
     end
     children[#children + 1] = heading("Recent Requests", w, { kind = "tab", tab = "requests" })
     if state.requests and state.requests[1] then
@@ -455,9 +539,9 @@ local function home(state, g)
         )
     end
     children[#children + 1] = actions({
+        { "Stats", { kind = "stats" } },
+        { "Friends", { kind = "social" } },
         { "Series", { kind = "series_list" } },
-        { "Releases", { kind = "new_releases" } },
-        { "Activity", { kind = "books_filter", filter = "recent" } },
         { "Downloads", { kind = "books_filter", filter = "local" } },
     }, w)
     if state.canResume then
@@ -530,6 +614,8 @@ local function detail(state, g)
             { kind = b.seriesName and "series" or "genres", book = b, q = b.seriesName },
         },
     }, w)
+    children[#children + 1] =
+        View.button("More like this in Roulette", w, { kind = "more_like_this", book = b }, false, "shuffle")
     if state.related and #state.related > 0 then
         children[#children + 1] = shelf(state.related, w, 4)
     end
@@ -576,14 +662,8 @@ end
 
 local function roulette(state, g)
     local w, b = g.content, state.book
-    local children = { heading("Book Roulette", w) }
-    local notice = state.loading and "Finding recommendations…"
-        or state.error
-        or (state.cached and "Saved on this Kobo · Refresh when connected")
-        or (state.body.partial and "Some catalog data is unavailable. You can retry with Refresh.")
-    if notice then
-        children[#children + 1] = label(notice, Theme.small, w, { lines = 1, col = ink.g5 })
-    end
+    local remaining = state.remaining and state.remaining > 1 and (tostring(state.remaining) .. " cards ready") or nil
+    local children = { heading(state.title or "Book Roulette", w, nil, remaining), notice(state, w, true) }
     if not state.body.onboarded then
         children[#children + 1] = View.button("Choose your favorite books & genres", w, { kind = "roulette_tastes" })
     end
@@ -658,6 +738,9 @@ local function settings(state, g)
             },
         }, w),
         actions({ { "Sync now", { kind = "sync_now" } }, { "Sync status", { kind = "sync_status" } } }, w),
+        heading("BookOrbit hub", w),
+        actions({ { "Reading stats", { kind = "stats" } }, { "Friends", { kind = "social" } } }, w),
+        actions({ { "Hub options", { kind = "hub_settings" } }, { "Diagnostics", { kind = "diagnostics" } } }, w),
         heading("Application", w),
         View.button(
             state.updateVersion and ("Update to " .. state.updateVersion) or "About & updates",
@@ -669,6 +752,168 @@ local function settings(state, g)
     })
 end
 
+-- Reading time per day as a small bar chart, oldest on the left.
+local function dayBars(minutes, w, h)
+    local count = #minutes
+    if count == 0 then
+        return nil
+    end
+    local gap = px(4)
+    local bw = math.floor((w - gap * (count - 1)) / count)
+    local most = 1
+    for _, m in ipairs(minutes) do
+        most = math.max(most, tonumber(m) or 0)
+    end
+    local bars = {}
+    for _, m in ipairs(minutes) do
+        local bh = math.floor(h * (tonumber(m) or 0) / most + 0.5)
+        bars[#bars + 1] = bh > 0 and UI.rect(bw, bh, ink.black, px(1)) or UI.rect(bw, math.max(1, px(1)), ink.g8)
+    end
+    return row({ w = w, h = h, gap = gap, valign = "bottom" }, bars)
+end
+
+local function stats(state, g)
+    local body, w = state.body or {}, g.content
+    local minutes = body.minutes or {}
+    local goal, streak = body.goal or {}, body.streak or {}
+    local children = { heading("Reading stats", w) }
+    if not body.minutes then
+        children[#children + 1] = label(
+            state.loading and "Loading your reading…" or state.error or "Refresh to load your reading stats.",
+            Theme.body,
+            w,
+            { lines = 3 }
+        )
+        return stack({ w = w, gap = px(10) }, children)
+    end
+    local half = math.floor((w - px(8)) / 2)
+    local function figure(value, caption)
+        return stack({ w = half, gap = px(2) }, {
+            label(value, 22, half, { serif = true, b = true }),
+            label(caption, Theme.small, half, { col = ink.g5 }),
+        })
+    end
+    children[#children + 1] = row({ w = w, gap = px(8), valign = "top" }, {
+        figure(Model.minutes(minutes.today), "Today"),
+        figure(Model.minutes(minutes.week), "Last 7 days"),
+    })
+    children[#children + 1] = row({ w = w, gap = px(8), valign = "top" }, {
+        figure(Model.minutes(minutes.month), "Last 30 days"),
+        figure(Model.minutes(minutes.year), "Last 12 months"),
+    })
+    children[#children + 1] = heading("Last two weeks", w)
+    children[#children + 1] = dayBars(body.lastFourteenDays or {}, w, px(70))
+    children[#children + 1] = heading("Streak", w)
+    children[#children + 1] = label(
+        tostring(streak.current or 0)
+            .. "-day streak · longest "
+            .. tostring(streak.longest or 0)
+            .. " days · "
+            .. tostring(body.readingDaysThisYear or 0)
+            .. " reading days this year",
+        Theme.body,
+        w,
+        { lines = 2 }
+    )
+    children[#children + 1] = heading("Goal for " .. tostring(goal.year or ""), w)
+    if tonumber(goal.goal) and goal.goal > 0 then
+        children[#children + 1] = UI.bar(w, px(8), math.min(100, (goal.done or 0) * 100 / goal.goal))
+        children[#children + 1] =
+            label(tostring(goal.done or 0) .. " of " .. tostring(goal.goal) .. " books", Theme.small, w, { b = true })
+    else
+        children[#children + 1] = label(
+            tostring(goal.done or 0) .. " books finished. Set a yearly goal on the BookOrbit dashboard.",
+            Theme.small,
+            w,
+            { lines = 2 }
+        )
+    end
+    children[#children + 1] = actions({
+        { "Finished: " .. tostring(body.finishedTotal or 0), { kind = "finished_books" } },
+        { "Reading: " .. tostring(body.readingNow or 0), { kind = "books_filter", filter = "reading" } },
+    }, w)
+    if state.finished and #state.finished > 0 then
+        children[#children + 1] = heading("Recently finished", w)
+        children[#children + 1] = shelf(state.finished, w, 4, true)
+    end
+    return stack({ w = w, gap = px(10) }, children)
+end
+
+local function lines(items, w, empty)
+    local out = {}
+    for _, text in ipairs(items or {}) do
+        out[#out + 1] = label(text, Theme.small, w, { lines = 2 })
+    end
+    if #out == 0 then
+        out[1] = label(empty, Theme.small, w, { col = ink.g5 })
+    end
+    return stack({ w = w, gap = px(4) }, out)
+end
+
+local function diagnostics(state, g)
+    local d, w = state.diag or {}, g.content
+    local cache = d.cache or {}
+    local children = {
+        heading("Diagnostics", w, nil, "BookOrbit " .. tostring(d.version or "") .. " · " .. tostring(d.user or "")),
+        label(
+            (d.connected and "Connected" or "Offline")
+                .. " · "
+                .. tostring(cache.files or 0)
+                .. " saved pages ("
+                .. Model.bytes(cache.bytes)
+                .. ", "
+                .. tostring(cache.dirty or 0)
+                .. " waiting to be written) · "
+                .. tostring(d.covers or 0)
+                .. " covers ("
+                .. Model.bytes(d.coverBytes)
+                .. ")",
+            Theme.small,
+            w,
+            { lines = 3 }
+        ),
+        heading("Saved actions", w),
+        lines(d.outbox, w, "Nothing waiting to be sent."),
+    }
+    if d.outbox and #d.outbox > 0 then
+        children[#children + 1] = actions({
+            { "Send now", { kind = "outbox_send" } },
+            { "Discard all", { kind = "outbox_discard" } },
+        }, w)
+    end
+    children[#children + 1] = heading("Followed requests", w)
+    children[#children + 1] = lines(d.watched, w, "No request is being followed.")
+    children[#children + 1] = heading("Downloads and cleanup", w)
+    children[#children + 1] = label("Last run: " .. tostring(d.upkeep), Theme.small, w, { lines = 2 })
+    children[#children + 1] = heading("Request timing", w)
+    children[#children + 1] = lines(d.timings, w, "No requests timed since BookOrbit opened.")
+    children[#children + 1] = heading("Recent events", w)
+    children[#children + 1] = lines(d.events, w, "Nothing recorded yet.")
+    children[#children + 1] = actions({
+        { "Run downloads now", { kind = "upkeep_now" } },
+        { "Clear saved pages", { kind = "clear_cache" } },
+    }, w)
+    return stack({ w = w, gap = px(10) }, children)
+end
+
+local function hubSettings(state, g)
+    local w = g.content
+    local children = { heading("Hub options", w, nil, "Changes apply at once") }
+    for _, option in ipairs(Model.OPTIONS) do
+        children[#children + 1] = stack({ w = w, gap = px(4) }, {
+            label(option.label, Theme.small, w, { lines = 2, col = ink.g5 }),
+            View.button(Model.settingLabel(state.settings, option.key), w, { kind = "hub_option", key = option.key }),
+        })
+    end
+    children[#children + 1] = label(
+        "Downloads while charging use your Wi-Fi when it is already on. Removing finished downloads keeps your notes and highlights, which BookOrbit stores. Error reports contain the error text and plugin version only.",
+        Theme.small,
+        w,
+        { lines = 5, col = ink.g5 }
+    )
+    return stack({ w = w, gap = px(10) }, children)
+end
+
 function View.build(state, w, h)
     local g = Theme.geometry(w, h)
     -- Reserve the native scrollbar's width. It appears only when font scaling
@@ -676,6 +921,8 @@ function View.build(state, w, h)
     g.content = g.content - px(10)
     local hit_start = UI.hitMark()
     local kind = state.route.kind
+    state.coverRects = {}
+    cover_rects = state.coverRects
     local body
     if kind == "roulette" then
         body = roulette(state, g)
@@ -691,15 +938,19 @@ function View.build(state, w, h)
         body = requestDetail(state, g)
     elseif kind == "series" then
         body = series(state, g)
+    elseif kind == "stats" then
+        body = stats(state, g)
+    elseif kind == "diagnostics" then
+        body = diagnostics(state, g)
+    elseif kind == "hub_settings" then
+        body = hubSettings(state, g)
     else
         body = listBody(state, g)
     end
-    local note = state.loading and "Loading…"
-        or state.error
-        or (state.cached and "Saved on this Kobo · Refresh for the latest status" or nil)
+    cover_rects = nil
     local body_widgets = {}
-    if note and not View.isList(kind) then
-        body_widgets[#body_widgets + 1] = label(note, Theme.small, g.content, { lines = 1, col = ink.g5 })
+    if not View.isList(kind) and kind ~= "settings" and kind ~= "hub_settings" and kind ~= "diagnostics" then
+        body_widgets[#body_widgets + 1] = notice(state, g.content, false)
     end
     body_widgets[#body_widgets + 1] = body
     local content = stack({ w = g.content, gap = px(6) }, body_widgets)

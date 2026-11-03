@@ -86,12 +86,14 @@ function MenuPage:rebuild()
 end
 
 -- Rebuilds and repaints. The sheet's backdrop never changes, so a rebuild only
--- needs the panel's rectangle when the panel kept its size.
-function MenuPage:refresh(mode)
+-- needs the panel's rectangle when the panel kept its size. A caller that knows
+-- only part of the page changed (a cover that arrived) passes that region, and
+-- the e-ink refresh stays inside it.
+function MenuPage:refresh(mode, only)
     local before = self.panel_rect and self.panel_rect:copy() or nil
     self:rebuild()
-    local region = self.dimen
-    if before and self.panel_rect and before.h == self.panel_rect.h then region = self.panel_rect end
+    local region = only or self.dimen
+    if not only and before and self.panel_rect and before.h == self.panel_rect.h then region = self.panel_rect end
     UIManager:setDirty(self, function() return mode or "ui", region end)
 end
 

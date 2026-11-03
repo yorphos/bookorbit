@@ -16,14 +16,21 @@ local records, status, requests, request_list = {}, "approved", {}, {}
 for i = 1, 20 do records[i] = {bookId = i + 100, title = "Public-domain title " .. i, authors = {"An author"}, hasCover = false} end
 local client = {}
 function client:runInSubprocess(fn) local body, err, errbody = fn(); return true, {body = body, err = err, errbody = errbody} end
-function client:requestBlocking(method, path, payload)
-    requests[#requests + 1] = {method = method, path = path, payload = payload}
+local etags = {}
+function client:requestBlocking(method, path, payload, headers, meta)
+    requests[#requests + 1] = {method = method, path = path, payload = payload, headers = headers}
+    if etags[path] and meta then meta.etag = etags[path] end
+    if etags[path] and headers and headers["if-none-match"] == etags[path] then return nil, 304, {} end
     if path:match("/refused$") then return nil, 403, {statusCode = 403, message = "Your account does not have permission to request books"}
     elseif path:match("roulette/decision$") then return {eventId=payload.eventId}
     elseif path:match("roulette/undo$") then return {undone=true}
     elseif path:match("roulette/acquire$") then return {results={{key=payload.keys[1],request={id=77,status="pending"}}}}
     elseif path:find("roulette/matches",1,true) then return {items={{title="Frankenstein",authors={"Mary Shelley"},matchKey=string.rep("a",32),providerKey="openLibrary",providerId="OL123W",genres={"Gothic","Horror"},description="A public-domain novel."}},hasMore=false}
-    elseif path:match("roulette$") then return {items={{title="Frankenstein; or, The Modern Prometheus",authors={"Mary Wollstonecraft Shelley"},genres={"Gothic","Horror","Science fiction"},description=string.rep("A scientist creates life and faces the consequences. ",12),recommendationWhy="Shares Gothic and Horror with a book you liked.",providerKey="openLibrary",providerId="OL123W"}},onboarded=false}
+    elseif path:find("hub/stats", 1, true) then return {goal={goal=24,done=5,year=2026},streak={current=3,longest=9},minutes={today=20,week=140,month=600,year=5000},lastFourteenDays={0,10,20,30,0,40,50,60,0,70,80,90,0,20},readingDaysThisYear=120,finishedTotal=40,readingNow=2,recentlyFinished=records}
+    elseif path:find("hub/social/sharing", 1, true) then return {share=payload.share}
+    elseif path:find("hub/social", 1, true) then return {share=true, people={"Bea"}, items={{id=5,title="Shared title",authors={"An author"},friend="Bea",kind="recommended",note="Loved it",detailUrl="/x"}}}
+    elseif path:find("hub/wishlist", 1, true) then return {key=string.rep("c",32)}
+    elseif path:find("roulette?count=", 1, true) then return {items={{rouletteKey=string.rep("b",32),title="Frankenstein; or, The Modern Prometheus",authors={"Mary Wollstonecraft Shelley"},genres={"Gothic","Horror","Science fiction"},description=string.rep("A scientist creates life and faces the consequences. ",12),recommendationWhy="Shares Gothic and Horror with a book you liked.",providerKey="openLibrary",providerId="OL123W"}},onboarded=false}
     elseif path:find("hub/home", 1, true) or path:find("hub/discover", 1, true) then return {recommendations = records, continueReading = {}, requests = {}, canRequest = true}
     elseif method == "POST" and (path:match("requests/77/replacement$") or path:match("requests/book/101/replacement$")) then return {request={id=78, title="Frankenstein", canChooseRelease=true, status="approved"}}
     elseif path:match("requests/91$") then return {id = 91, title = "Walden", authors = {"Henry David Thoreau"}, status = "downloading", progressPercent = 10}
@@ -31,6 +38,11 @@ function client:requestBlocking(method, path, payload)
     elseif method == "POST" and path:match("requests$") then return {request = {id = 77, title = "Frankenstein", authors = {"Mary Shelley"}, status = status}}
     elseif path:find("catalog/books/", 1, true) then return {id = 101, bookId = 101, title = "Public-domain title", authors = {"An author"}, hasCover = false}
     elseif path:find("discovery/works", 1, true) then return {title = "Frankenstein", description = "A public-domain novel.", editions = {}}
+    elseif path:find("requests/watch?ids=", 1, true) then
+        local wanted, items = {}, {}
+        for id in path:match("ids=([%d,]+)"):gmatch("%d+") do wanted[id] = true end
+        for _, r in ipairs(request_list) do if wanted[tostring(r.id)] then items[#items + 1] = r end end
+        return {items = items}
     elseif path:find("requests?", 1, true) then return {items = request_list, hasMore = false}
     else return {items = records, hasMore = false} end
 end
@@ -207,20 +219,76 @@ local acquisition_start=#requests
 tap("primary")
 assert(requests[acquisition_start+1].path:match("roulette/acquire$"),"Add to Library must use the explicit acquisition endpoint")
 assert(plugin.settings.hub_watched_requests.items["77"], "Requests created from Matches must be followed")
--- A decision whose reply never arrived can be discarded instead of blocking Roulette.
+-- Offline, a Roulette decision moves to the next card at once and waits in the outbox.
 local Roulette = require("bookorbit_roulette")
-plugin.settings.roulette_pending = {account = hub.account, payload = {eventId = "11111111-1111-4111-8111-111111111111", decision = "match", book = {title = "Lost reply"}}}
-local stuck_rows
-local menu_before = hub.menu
-hub.menu = function(_, _, rows) stuck_rows = rows end
-Roulette.decide(hub, "pass", {title = "Next book", authors = {}})
-assert(stuck_rows and #stuck_rows == 2, "An unconfirmed decision must offer Retry and Discard")
-hub.menu = menu_before
-local discard_start = #requests
-stuck_rows[2].callback()
-local sent = requests[discard_start + 1]
-assert(sent.path:match("roulette/decision$") and sent.payload.book.title == "Next book" and sent.payload.decision == "pass", "Discarding must continue with the new decision")
-assert(plugin.settings.roulette_pending == nil, "The new decision is confirmed and cleared")
+local Outbox = require("bookorbit_hub_outbox")
+hub:navigate({kind = "roulette"})
+assert(hub.state.book and hub.state.remaining == 1, "The saved deck shows its first card")
+connected = false
+local offline_start = #requests
+tap("roulette_decide")
+assert(#requests == offline_start, "Offline decisions must not try the network")
+assert(Outbox.count(hub) == 1 and hub.state.book == nil, "The decided card leaves the deck while its decision waits")
+Roulette.undo(hub)
+assert(Outbox.count(hub) == 0 and hub.state.book ~= nil, "Undo of a waiting decision drops it and brings the card back")
+tap("roulette_decide")
+connected = true
+Outbox.drain(hub)
+local delivered
+for i = offline_start + 1, #requests do if requests[i].path:match("roulette/decision$") then delivered = requests[i] end end
+assert(delivered and delivered.payload.eventId and Outbox.count(hub) == 0, "Waiting decisions go out once BookOrbit can be reached")
+-- Wishlist changes made offline are queued the same way.
+hub:navigate({kind = "detail", book = {title = "Walden", authors = {"Henry David Thoreau"}, providerKey = "openLibrary", providerId = "OL1W"}})
+connected = false
+hub:action({kind = "save_wishlist", book = hub.state.book})
+assert(Outbox.count(hub) == 1 and Outbox.items(hub)[1].path:match("hub/wishlist$"), "An offline wishlist change waits in the outbox")
+connected = true
+Outbox.drain(hub)
+assert(Outbox.count(hub) == 0 and requests[#requests].path:match("hub/wishlist$"), "It is sent when back online")
+-- A cover that arrives repaints only its own rectangle.
+hub:navigate({kind = "home"}); paint()
+local regions, refresh_before = {}, hub.page.refresh
+hub.page.refresh = function(page, mode, region) regions[#regions + 1] = region or false; return refresh_before(page, mode, region) end
+hub.visibleCovers = {{hub_cover_key = "cover-key", hasCover = true}}
+hub.state.coverRects = {["cover-key"] = Geom:new{x = 60, y = 400, w = 80, h = 120}}
+local cached_path = hub.catalog.cachedThumbnailPath
+hub.catalog.cachedThumbnailPath = function(_, b) return b.hub_cover_key == "cover-key" and "/nonexistent-cover.jpg" or nil end
+hub:coversArrived(); assert(hub.coverTimer, "Covers arriving together are coalesced"); hub.coverTimer()
+assert(#regions == 1 and regions[1] and regions[1].w == 80 and regions[1].h == 120, "Only the arrived cover is refreshed")
+hub.catalog.cachedThumbnailPath = cached_path
+-- A page that did not change answers 304, and only the notice line repaints.
+local books_path = hub:path({kind = "books", page = 1})
+etags[books_path] = 'W/"books"'
+hub:navigate({kind = "books", page = 1}); paint()
+hub:navigate({kind = "home"}); paint()
+regions = {}
+-- On a Kobo the screen repaints while a request is in flight.
+local plain_run = client.runInSubprocess
+client.runInSubprocess = function(self, fn) paint(); return plain_run(self, fn) end
+hub:navigate({kind = "books", page = 1}); paint()
+client.runInSubprocess = plain_run
+local revalidation = requests[#requests]
+assert(revalidation.headers and revalidation.headers["if-none-match"] == 'W/"books"', "A saved page is revalidated with its tag")
+local full = 0
+for _, region in ipairs(regions) do if not region then full = full + 1 end end
+assert(full == 1 and #regions == 2 and regions[2] and regions[2].h < 100, "An unchanged page repaints only its notice line")
+assert(not hub.state.cached, "The saved copy counts as current after a 304")
+etags[books_path] = nil
+hub.page.refresh = refresh_before
+-- Stats, Friends, Hub options and Diagnostics render within the screen.
+hub:action({kind = "stats"}); paint()
+assert(hub.route.kind == "stats" and hub.state.body.minutes.week == 140, "Stats load from the hub endpoint")
+hub:action({kind = "social"}); paint()
+assert(hub.state.visible[1].hint:find("Bea recommends", 1, true), "Friends show who recommends what")
+hub:action({kind = "share_toggle"})
+assert(requests[#requests - 1].path:match("social/sharing$") and requests[#requests - 1].payload.share == false, "The sharing switch flips the current state")
+hub:action({kind = "hub_settings"}); paint()
+local before_option = plugin.settings.hub_cleanup_days
+hub:action({kind = "hub_option", key = "hub_cleanup_days"})
+assert(before_option == nil and plugin.settings.hub_cleanup_days == 14, "Options cycle from their default")
+plugin.settings.hub_cleanup_days = nil
+hub:action({kind = "diagnostics"}); paint()
+assert(hub.state.diag and hub.state.diag.cache, "Diagnostics show cache state")
 hub:close()
 local original_document={position=42,annotations={"preserved"}}
 plugin.ui={document=original_document}
